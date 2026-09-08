@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# CSVs reais de importação do catálogo VOD podem referenciar títulos/links que
+# você não necessariamente quer versionados — só o exemplo fica no repo
+data/*.csv
+!data/titulos.exemplo.csv

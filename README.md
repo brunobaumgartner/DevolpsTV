@@ -56,36 +56,52 @@ mysql/     — schema inicial (rodado automaticamente na primeira subida do cont
 
 As tabelas `vod_titles` e `vod_items` ficam **vazias por padrão** — nenhum worker
 popula isso automaticamente, e nenhuma fonte externa é consultada. Você adiciona
-manualmente, título por título, conforme for conseguindo autorização pra cada
-obra (ver `ARQUITETURA.md` seção 10 pro porquê disso).
+manualmente, conforme for conseguindo autorização pra cada obra (ver
+`ARQUITETURA.md` seção 9 pro porquê dessa decisão).
 
-**Filme** (1 título = 1 item, sem season/episode):
+### Via CSV (recomendado — `api/app/import_vod.py`)
+
+1. Copie `data/titulos.exemplo.csv` e edite com seus títulos. Colunas:
+
+   ```
+   type,title,description,poster_url,genre,year,season_number,episode_number,episode_title,stream_url
+   ```
+
+   - `type`: `movie` ou `series`
+   - `title`: linhas com o mesmo `title`+`type` viram episódios do MESMO título
+   - `season_number`/`episode_number`/`episode_title`: só pra `series`, deixe em branco pra `movie`
+   - `stream_url`: pode deixar em branco se ainda não tem o link/autorização — dá pra rodar o script de novo depois só preenchendo essa coluna. **Uma célula em branco nunca apaga um link já salvo.**
+
+2. Suba o arquivo pra VPS (o `docker-compose.yml` já monta `./data` dentro do container da API):
+
+   ```bash
+   scp -P 443 seus-titulos.csv root@144.91.70.44:/srv/iptv/data/
+   ```
+
+3. Rode a importação:
+
+   ```bash
+   ssh whatispromo "docker exec iptv-api-1 python -m app.import_vod /app/data/seus-titulos.csv"
+   ```
+
+   É idempotente — pode rodar quantas vezes quiser com o arquivo atualizado (títulos/links novos são adicionados, os já existentes são atualizados, nada duplica).
+
+### Via SQL direto (alternativa)
 
 ```sql
+-- Filme (1 título = 1 item, sem season/episode)
 INSERT INTO vod_titles (type, title, description, poster_url, genre, year)
 VALUES ('movie', 'Nome do Filme', 'Sinopse opcional', 'https://.../poster.jpg', 'Ação', 2020);
+INSERT INTO vod_items (title_id, stream_url) VALUES (LAST_INSERT_ID(), 'https://.../filme.m3u8');
 
--- pega o id gerado (ou faça SELECT LAST_INSERT_ID())
-INSERT INTO vod_items (title_id, stream_url)
-VALUES (LAST_INSERT_ID(), 'https://.../filme.m3u8');
-```
-
-**Série** (1 título = vários episódios):
-
-```sql
+-- Série (1 título = vários episódios)
 INSERT INTO vod_titles (type, title, poster_url, genre, year)
 VALUES ('series', 'Nome da Série', 'https://.../poster.jpg', 'Drama', 2019);
-
 SET @tid = LAST_INSERT_ID();
-
 INSERT INTO vod_items (title_id, season_number, episode_number, episode_title, stream_url) VALUES
   (@tid, 1, 1, 'Piloto', 'https://.../s01e01.m3u8'),
-  (@tid, 1, 2, 'Episódio 2', NULL); -- stream_url NULL = ainda sem autorização/link pra esse episódio
+  (@tid, 1, 2, 'Episódio 2', NULL); -- NULL = ainda sem link
 ```
-
-Um `vod_item` com `stream_url` NULL aparece no catálogo marcado como indisponível
-— dá pra já cadastrar o título/episódios e ir preenchendo os links depois, sem
-precisar redigitar tudo.
 
 Rodando direto na VPS: `docker exec -it iptv-mysql-1 mysql -uroot -p<senha> iptv`
 

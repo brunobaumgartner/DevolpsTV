@@ -27,6 +27,9 @@ services:
       - "${API_PORT:-7678}:7678"
     volumes:
       - ./frontend:/app/frontend:ro
+      # CSVs pra importar no catálogo VOD (ver README.md) — rw porque não tem
+      # nada sensível aqui além do que você mesmo colocar
+      - ./data:/app/data
     depends_on:
       mysql:
         condition: service_healthy
