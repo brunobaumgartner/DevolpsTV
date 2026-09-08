@@ -66,6 +66,44 @@ class Program(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class VodTitle(Base):
+    """Catálogo sob demanda (filmes/séries) — fica vazio até você adicionar
+    títulos/links manualmente, conforme for conseguindo autorização pra cada
+    obra. Nunca é populado automaticamente por nenhum worker. Ver
+    ARQUITETURA.md seção 10."""
+
+    __tablename__ = "vod_titles"
+
+    id = Column(Integer, primary_key=True)
+    type = Column(String(10), nullable=False)  # "movie" ou "series"
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    poster_url = Column(String(500))
+    genre = Column(String(100))
+    year = Column(Integer)
+    created_at = Column(DateTime, server_default=func.now())
+
+    items = relationship("VodItem", back_populates="vod_title", cascade="all, delete-orphan")
+
+
+class VodItem(Base):
+    """Um item reproduzível: pra filme, 1 item por título (season/episode nulos);
+    pra série, 1 item por episódio. `stream_url` fica NULL até você preencher —
+    é o que marca o item como disponível ou não."""
+
+    __tablename__ = "vod_items"
+
+    id = Column(Integer, primary_key=True)
+    title_id = Column(Integer, ForeignKey("vod_titles.id", ondelete="CASCADE"), nullable=False)
+    season_number = Column(Integer)
+    episode_number = Column(Integer)
+    episode_title = Column(String(500))
+    stream_url = Column(String(1000))
+    created_at = Column(DateTime, server_default=func.now())
+
+    vod_title = relationship("VodTitle", back_populates="items")
+
+
 class AccessToken(Base):
     __tablename__ = "access_tokens"
 

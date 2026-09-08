@@ -49,6 +49,32 @@ CREATE TABLE IF NOT EXISTS programs (
     KEY idx_channel_time (channel_id, start_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Catálogo sob demanda (filmes/séries), a preencher manualmente conforme
+-- autorização for obtida — fica vazio por padrão, nunca populado automaticamente.
+-- Ver ARQUITETURA.md secao 10.
+CREATE TABLE IF NOT EXISTS vod_titles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type ENUM('movie','series') NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    description TEXT NULL,
+    poster_url VARCHAR(500) NULL,
+    genre VARCHAR(100) NULL,
+    year INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS vod_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title_id INT NOT NULL,
+    season_number INT NULL,
+    episode_number INT NULL,
+    episode_title VARCHAR(500) NULL,
+    stream_url VARCHAR(1000) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vod_item_title FOREIGN KEY (title_id) REFERENCES vod_titles(id) ON DELETE CASCADE,
+    KEY idx_title (title_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS access_tokens (
     id INT AUTO_INCREMENT PRIMARY KEY,
     token VARCHAR(64) NOT NULL,

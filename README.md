@@ -52,6 +52,43 @@ frontend/  — painel web simples (HTML puro + hls.js), só pra testar o backend
 mysql/     — schema inicial (rodado automaticamente na primeira subida do container)
 ```
 
+## Adicionando títulos ao catálogo VOD (filmes/séries)
+
+As tabelas `vod_titles` e `vod_items` ficam **vazias por padrão** — nenhum worker
+popula isso automaticamente, e nenhuma fonte externa é consultada. Você adiciona
+manualmente, título por título, conforme for conseguindo autorização pra cada
+obra (ver `ARQUITETURA.md` seção 10 pro porquê disso).
+
+**Filme** (1 título = 1 item, sem season/episode):
+
+```sql
+INSERT INTO vod_titles (type, title, description, poster_url, genre, year)
+VALUES ('movie', 'Nome do Filme', 'Sinopse opcional', 'https://.../poster.jpg', 'Ação', 2020);
+
+-- pega o id gerado (ou faça SELECT LAST_INSERT_ID())
+INSERT INTO vod_items (title_id, stream_url)
+VALUES (LAST_INSERT_ID(), 'https://.../filme.m3u8');
+```
+
+**Série** (1 título = vários episódios):
+
+```sql
+INSERT INTO vod_titles (type, title, poster_url, genre, year)
+VALUES ('series', 'Nome da Série', 'https://.../poster.jpg', 'Drama', 2019);
+
+SET @tid = LAST_INSERT_ID();
+
+INSERT INTO vod_items (title_id, season_number, episode_number, episode_title, stream_url) VALUES
+  (@tid, 1, 1, 'Piloto', 'https://.../s01e01.m3u8'),
+  (@tid, 1, 2, 'Episódio 2', NULL); -- stream_url NULL = ainda sem autorização/link pra esse episódio
+```
+
+Um `vod_item` com `stream_url` NULL aparece no catálogo marcado como indisponível
+— dá pra já cadastrar o título/episódios e ir preenchendo os links depois, sem
+precisar redigitar tudo.
+
+Rodando direto na VPS: `docker exec -it iptv-mysql-1 mysql -uroot -p<senha> iptv`
+
 ## Próximos passos (fora do escopo deste v1)
 
 - Migrar exposição pública de IP direto para domínio + Cloudflare Tunnel + TLS

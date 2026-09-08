@@ -95,6 +95,47 @@
     color: var(--muted);
     margin-top: 1px;
   }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 8px 4px;
+    margin-right: 16px;
+    font-size: 13px;
+  }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+  .vod-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .vod-card { cursor: pointer; font-size: 12px; }
+  .vod-card .poster {
+    width: 100%;
+    aspect-ratio: 2/3;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    object-fit: cover;
+    display: block;
+  }
+  .vod-card .vod-title { margin-top: 4px; line-height: 1.3; }
+  .vod-card .vod-badge {
+    display: inline-block;
+    font-size: 10px;
+    margin-top: 2px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .vod-card .vod-badge.available { color: var(--accent); border-color: var(--accent); }
+  .vod-empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
   #epg-panel { margin-top: 14px; }
   #epg-panel h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   .epg-item { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -120,8 +161,19 @@
   </section>
 
   <section>
-    <div class="categories" id="categories"></div>
-    <div class="channel-list" id="channel-list"></div>
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-live">TV ao vivo</button>
+      <button class="tab-btn" id="tab-vod">Filmes e Séries</button>
+    </div>
+
+    <div id="live-panel">
+      <div class="categories" id="categories"></div>
+      <div class="channel-list" id="channel-list"></div>
+    </div>
+
+    <div id="vod-panel" hidden>
+      <div id="vod-grid" class="vod-grid"></div>
+    </div>
   </section>
 </main>
 
@@ -132,12 +184,30 @@ const statusEl = document.getElementById("status");
 const listEl = document.getElementById("channel-list");
 const categoriesEl = document.getElementById("categories");
 const video = document.getElementById("player");
+const tabLiveBtn = document.getElementById("tab-live");
+const tabVodBtn = document.getElementById("tab-vod");
+const livePanel = document.getElementById("live-panel");
+const vodPanel = document.getElementById("vod-panel");
+const vodGridEl = document.getElementById("vod-grid");
 
 let allChannels = [];
 let activeCategory = null;
 let hls = null;
 let currentToken = null;
 let playRequestId = 0; // evita que uma verificação antiga sobrescreva um clique mais novo
+let vodLoaded = false;
+
+tabLiveBtn.addEventListener("click", () => switchTab("live"));
+tabVodBtn.addEventListener("click", () => switchTab("vod"));
+
+function switchTab(tab) {
+  const isLive = tab === "live";
+  tabLiveBtn.classList.toggle("active", isLive);
+  tabVodBtn.classList.toggle("active", !isLive);
+  livePanel.hidden = !isLive;
+  vodPanel.hidden = isLive;
+  if (!isLive && !vodLoaded && currentToken) loadVod();
+}
 
 // lembra o token no navegador do usuário (não sai daqui, é só localStorage).
 // Em aba anônima ou contexto sandboxed o localStorage pode não existir — não deve
@@ -337,31 +407,136 @@ function tryMirror(channel, mirrors, index) {
       ? `Reproduzindo: ${channel.name} (servidor ${index + 1}/${mirrors.length})`
       : `Reproduzindo: ${channel.name}`;
 
-  if (hls) {
-    hls.destroy();
-    hls = null;
-  }
-
   const url = mirrors[index];
   const goToNextMirror = () => {
     reportFailure(channel, url);
     tryMirror(channel, mirrors, index + 1);
   };
+  playUrl(url, goToNextMirror);
+}
 
-  if (Hls.isSupported()) {
+// toca uma URL no player, com fallback comum entre HLS.js e o <video> nativo.
+// onFatalError é chamado se a reprodução falhar de vez (opcional).
+function playUrl(url, onFatalError) {
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+
+  const isM3u8 = /\.m3u8(\?|$)/i.test(url);
+
+  if (isM3u8 && Hls.isSupported()) {
     hls = new Hls();
     hls.loadSource(url);
     hls.attachMedia(video);
     hls.on(Hls.Events.ERROR, (_evt, data) => {
-      if (data.fatal) {
-        goToNextMirror();
-      }
+      if (data.fatal && onFatalError) onFatalError();
     });
-  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+  } else if (isM3u8 && video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = url;
-    video.onerror = goToNextMirror;
+    video.onerror = onFatalError || null;
   } else {
-    statusEl.textContent = "Seu navegador não suporta HLS.";
+    // arquivo direto (ex: .mp4) — não precisa de HLS.js
+    video.src = url;
+    video.onerror = onFatalError || null;
+  }
+}
+
+// --- Filmes e Séries (catálogo VOD) ---
+
+let currentVodTitles = [];
+
+async function loadVod() {
+  vodGridEl.innerHTML = `<div class="vod-empty">Carregando...</div>`;
+  try {
+    const resp = await fetch(`p/${encodeURIComponent(currentToken)}/vod`);
+    if (!resp.ok) {
+      vodGridEl.innerHTML = `<div class="vod-empty">Falha ao carregar o catálogo.</div>`;
+      return;
+    }
+    const data = await resp.json();
+    vodLoaded = true;
+    currentVodTitles = data.titles || [];
+    renderVodGrid();
+  } catch {
+    vodGridEl.innerHTML = `<div class="vod-empty">Falha de rede ao carregar o catálogo.</div>`;
+  }
+}
+
+function renderVodGrid() {
+  if (!currentVodTitles.length) {
+    vodGridEl.innerHTML = `<div class="vod-empty">Catálogo ainda vazio — adicione títulos conforme for conseguindo autorização (ver README.md).</div>`;
+    return;
+  }
+  vodGridEl.innerHTML = "";
+  currentVodTitles.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "vod-card";
+    const badge = t.available
+      ? '<span class="vod-badge available">disponível</span>'
+      : '<span class="vod-badge">sem link ainda</span>';
+    card.innerHTML = `
+      ${t.poster_url ? `<img class="poster" src="${escapeHtml(t.poster_url)}" alt="" onerror="this.style.visibility='hidden'">` : `<div class="poster"></div>`}
+      <div class="vod-title">${escapeHtml(t.title)}</div>
+      ${badge}
+    `;
+    card.addEventListener("click", () => openVodTitle(t));
+    vodGridEl.appendChild(card);
+  });
+}
+
+async function openVodTitle(title) {
+  const panel = document.getElementById("epg-panel");
+  switchTab("live"); // volta pro player pra assistir
+  statusEl.textContent = `Carregando "${title.title}"...`;
+  panel.innerHTML = "";
+
+  try {
+    const resp = await fetch(`p/${encodeURIComponent(currentToken)}/vod/${title.id}`);
+    if (!resp.ok) {
+      statusEl.textContent = `Falha ao carregar "${title.title}".`;
+      return;
+    }
+    const data = await resp.json();
+
+    if (data.type === "movie") {
+      const item = data.items[0];
+      if (!item || !item.available) {
+        statusEl.textContent = `"${title.title}" ainda não tem link cadastrado.`;
+        return;
+      }
+      statusEl.textContent = `Reproduzindo: ${title.title}`;
+      playUrl(item.stream_url, () => {
+        statusEl.textContent = `Falha ao reproduzir "${title.title}".`;
+      });
+      return;
+    }
+
+    // série: mostra lista de episódios pra escolher
+    statusEl.textContent = `${title.title} — escolha um episódio abaixo.`;
+    const items = data.items
+      .map((i) => {
+        const label = `T${i.season_number ?? "?"}E${i.episode_number ?? "?"} — ${escapeHtml(i.episode_title || "")}`;
+        const cls = i.available ? "epg-item" : "epg-item current";
+        return `<div class="${cls}" data-item-id="${i.id}" style="cursor:${i.available ? "pointer" : "default"}">
+          <span class="title">${label}${i.available ? "" : " (sem link ainda)"}</span>
+        </div>`;
+      })
+      .join("");
+    panel.innerHTML = `<h2>Episódios — ${escapeHtml(title.title)}</h2>${items}`;
+
+    data.items.forEach((i) => {
+      if (!i.available) return;
+      const el = panel.querySelector(`[data-item-id="${i.id}"]`);
+      el.addEventListener("click", () => {
+        statusEl.textContent = `Reproduzindo: ${title.title} — T${i.season_number}E${i.episode_number}`;
+        playUrl(i.stream_url, () => {
+          statusEl.textContent = `Falha ao reproduzir esse episódio.`;
+        });
+      });
+    });
+  } catch {
+    statusEl.textContent = `Falha de rede ao carregar "${title.title}".`;
   }
 }
 </script>

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import FRONTEND_DIR
 from .db import Base, SessionLocal, engine
 from .models import AccessToken
-from .routers import channels, health, playlist
+from .routers import channels, health, playlist, vod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("iptv-api")
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(playlist.router)
 app.include_router(channels.router)
+app.include_router(vod.router)
 
 
 @app.on_event("startup")

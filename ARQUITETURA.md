@@ -172,7 +172,25 @@ Retomando a decisão da seção 4: **implementado**, usando [`limaalef/BrazilTVE
 - `GET /p/{token}/channels/{tvg_id}/epg` — próximas ~12h de programação de um canal
 - Frontend: "▶ [programa]" embaixo do nome na lista, e painel de programação ao selecionar um canal
 
-## 9. Segurança
+## 9. Catálogo sob demanda (filmes/séries) — decisão e escopo
+
+Em 2026-09-08 o usuário pediu pra incluir filmes e séries **sob demanda** (escolher episódio/filme específico), além dos canais lineares de TV que já existiam.
+
+**Fontes descartadas nessa investigação** (todas via gists de um único usuário, "sempreconceito"): listas antigas (2014-2017, uma delas se autodeclarando "Atualizado: 20/04/2017") e, mais importante, uma delas (`lista joabe.m3u`) não era nem lista de canais — era hospedagem direta de **episódios individuais de série** (Mr. Robot dublado) num CDN de pirataria dedicado (`netcine-bucket`). Isso é uma categoria diferente da agregação de TV aberta que o projeto já fazia:
+
+- **TV ao vivo (já implementado):** streams que o iptv-org alega serem disponibilizados publicamente pelos próprios detentores de direito — linha defensável
+- **VOD de CDN de pirataria:** cópia de obra protegida sem nenhuma alegação de autorização — sem margem de interpretação, mesmo pra uso pessoal (a legislação brasileira de direitos autorais não tem exceção de uso pessoal pra isso)
+
+**Decisão:** a funcionalidade de catálogo sob demanda foi construída, mas **sem nenhum conteúdo/link**. As tabelas `vod_titles` e `vod_items` ficam vazias por padrão — nenhum worker as popula, nenhuma fonte externa é consultada pra elas. O usuário adiciona manualmente título por título conforme for conseguindo autorização real (licença do detentor dos direitos, obra em domínio público/Creative Commons, ou produção própria) — ver README.md "Adicionando títulos ao catálogo VOD" pros comandos SQL.
+
+**O que foi construído:**
+- `vod_titles` (filme/série, metadados) + `vod_items` (1 item por filme, 1 por episódio de série — `stream_url` NULL até ser preenchido)
+- `GET /p/{token}/vod` — lista títulos com um `available: true/false` (se tem pelo menos 1 item com link)
+- `GET /p/{token}/vod/{id}` — detalhe com os episódios (pra série) e o status de cada um
+- Frontend: aba "Filmes e Séries" com grid de pôsteres; título sem link mostra badge "sem link ainda"; série abre lista de episódios, só os com link são clicáveis
+- Testado com dados temporários (inseridos, verificados, removidos) — catálogo real começa e permanece vazio
+
+## 10. Segurança
 
 1. **Exposição:** por ora, **IP direto da VPS na porta 7678** (decisão temporária, sem domínio ainda — ver seção 6). Plano original era Cloudflare Tunnel (sem porta pública aberta); migrar pra isso quando houver domínio definido
 2. **Link não adivinhável:** token aleatório no path da playlist/EPG, revogável — enquanto não há Cloudflare/TLS na frente, esse token é a principal barreira contra acesso indevido
@@ -183,7 +201,7 @@ Retomando a decisão da seção 4: **implementado**, usando [`limaalef/BrazilTVE
 7. **Rate limiting:** regra no Cloudflare na rota da playlist, contra abuso/polling agressivo
 8. *(Observação fora do escopo do projeto, registrada durante o levantamento da VPS: revisar `PermitRootLogin`/`PasswordAuthentication` do SSH em algum momento — não faz parte deste projeto)*
 
-## 10. Ideias de projetos de referência (pesquisa de mercado)
+## 11. Ideias de projetos de referência (pesquisa de mercado)
 
 Pesquisa feita em repositórios GitHub de IPTV pra buscar boas práticas e funcionalidades a incorporar:
 
@@ -199,7 +217,7 @@ Pesquisa feita em repositórios GitHub de IPTV pra buscar boas práticas e funci
 - Avaliar formato Xtream Codes como saída alternativa ao M3U (decisão pendente — complexidade extra a avaliar)
 - Avaliar usar GitHub Actions pra parte do processamento pesado, aliviando a VPS
 
-## 11. Decisões em aberto
+## 12. Decisões em aberto
 
 - [ ] Confirmar se vale adicionar saída em Xtream Codes além de M3U
 - [ ] Decidir se health-check vai ser granular (geo-bloqueado/DRM/áudio) desde o v1 ou só up/down inicialmente
@@ -208,7 +226,7 @@ Pesquisa feita em repositórios GitHub de IPTV pra buscar boas práticas e funci
 - [ ] Definir domínio/subdomínio e migrar exposição de IP direto para Cloudflare Tunnel + TLS
 - [ ] Decidir se o código do projeto vai pra um repositório GitHub (privado) ou fica só local/VPS
 
-## 12. Decisões fechadas para o v1 (2026-09-08)
+## 13. Decisões fechadas para o v1 (2026-09-08)
 
 Pra destravar o início da implementação, ficou definido:
 
