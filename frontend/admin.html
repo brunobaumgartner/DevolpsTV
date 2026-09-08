@@ -87,14 +87,18 @@
     <h2>Adicionar filme</h2>
     <div class="row">
       <div><label>Título *</label><input id="m-title" /></div>
-      <div><label>Gênero</label><input id="m-genre" /></div>
-      <div><label>Ano</label><input id="m-year" type="number" /></div>
+      <div>
+        <label>Gênero (opcional)</label>
+        <select id="m-genre"></select>
+        <input id="m-genre-outro" placeholder="Digite o gênero" hidden style="margin-top:6px;" />
+      </div>
+      <div><label>Ano (opcional)</label><input id="m-year" type="number" /></div>
     </div>
     <div class="row">
-      <div><label>Poster (URL)</label><input id="m-poster" /></div>
+      <div><label>Poster — URL (opcional)</label><input id="m-poster" /></div>
       <div><label>Link do stream (opcional — pode deixar em branco)</label><input id="m-url" /></div>
     </div>
-    <div class="row"><div><label>Descrição</label><textarea id="m-desc"></textarea></div></div>
+    <div class="row"><div><label>Descrição (opcional)</label><textarea id="m-desc"></textarea></div></div>
     <button id="m-add-btn">Adicionar filme</button>
     <div class="msg" id="m-msg"></div>
   </section>
@@ -103,14 +107,27 @@
     <h2>Adicionar série</h2>
     <div class="row">
       <div><label>Título *</label><input id="s-title" /></div>
-      <div><label>Gênero</label><input id="s-genre" /></div>
-      <div><label>Ano</label><input id="s-year" type="number" /></div>
+      <div>
+        <label>Gênero (opcional)</label>
+        <select id="s-genre"></select>
+        <input id="s-genre-outro" placeholder="Digite o gênero" hidden style="margin-top:6px;" />
+      </div>
+      <div><label>Ano (opcional)</label><input id="s-year" type="number" /></div>
     </div>
     <div class="row">
-      <div><label>Poster (URL)</label><input id="s-poster" /></div>
+      <div><label>Poster — URL (opcional)</label><input id="s-poster" /></div>
     </div>
-    <div class="row"><div><label>Descrição</label><textarea id="s-desc"></textarea></div></div>
-    <button id="s-add-btn">Adicionar série (episódios depois, na lista abaixo)</button>
+    <div class="row"><div><label>Descrição (opcional)</label><textarea id="s-desc"></textarea></div></div>
+    <p style="color: var(--muted); font-size: 12px; margin: 4px 0 8px;">
+      Já pode cadastrar o 1º episódio aqui (opcional). Os demais dá pra adicionar depois, na lista do catálogo abaixo.
+    </p>
+    <div class="row">
+      <div style="flex: 0 0 70px;"><label>Temp.</label><input id="s-ep-season" type="number" /></div>
+      <div style="flex: 0 0 70px;"><label>Ep.</label><input id="s-ep-number" type="number" /></div>
+      <div><label>Nome do episódio</label><input id="s-ep-title" /></div>
+      <div><label>Link do episódio</label><input id="s-ep-url" /></div>
+    </div>
+    <button id="s-add-btn">Adicionar série</button>
     <div class="msg" id="s-msg"></div>
   </section>
 
@@ -173,6 +190,37 @@ async function apiFetch(path, options = {}) {
   return resp;
 }
 
+const GENRES = [
+  "Ação", "Animação", "Aventura", "Biografia", "Comédia", "Crime",
+  "Documentário", "Drama", "Esporte", "Família", "Fantasia", "Guerra",
+  "História", "Infantil", "Musical", "Mistério", "Romance",
+  "Ficção Científica", "Suspense", "Terror",
+];
+
+function setupGenreSelect(selectId, outroInputId) {
+  const select = document.getElementById(selectId);
+  const outroInput = document.getElementById(outroInputId);
+  select.innerHTML =
+    `<option value="">Selecione (opcional)</option>` +
+    GENRES.map((g) => `<option value="${g}">${g}</option>`).join("") +
+    `<option value="__outro__">Outro...</option>`;
+  select.addEventListener("change", () => {
+    outroInput.hidden = select.value !== "__outro__";
+    if (!outroInput.hidden) outroInput.focus();
+  });
+}
+
+function genreValue(selectId, outroInputId) {
+  const select = document.getElementById(selectId);
+  if (select.value === "__outro__") {
+    return document.getElementById(outroInputId).value.trim() || null;
+  }
+  return select.value || null;
+}
+
+setupGenreSelect("m-genre", "m-genre-outro");
+setupGenreSelect("s-genre", "s-genre-outro");
+
 document.getElementById("m-add-btn").addEventListener("click", async () => {
   const msg = document.getElementById("m-msg");
   const title = document.getElementById("m-title").value.trim();
@@ -183,7 +231,7 @@ document.getElementById("m-add-btn").addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         title,
-        genre: document.getElementById("m-genre").value.trim() || null,
+        genre: genreValue("m-genre", "m-genre-outro"),
         year: Number(document.getElementById("m-year").value) || null,
         poster_url: document.getElementById("m-poster").value.trim() || null,
         stream_url: document.getElementById("m-url").value.trim() || null,
@@ -195,7 +243,10 @@ document.getElementById("m-add-btn").addEventListener("click", async () => {
       return setMsg(msg, body.detail || "Falha ao adicionar.", true);
     }
     setMsg(msg, `"${title}" adicionado.`, false);
-    ["m-title", "m-genre", "m-year", "m-poster", "m-url", "m-desc"].forEach((id) => (document.getElementById(id).value = ""));
+    ["m-title", "m-year", "m-poster", "m-url", "m-desc"].forEach((id) => (document.getElementById(id).value = ""));
+    document.getElementById("m-genre").value = "";
+    document.getElementById("m-genre-outro").hidden = true;
+    document.getElementById("m-genre-outro").value = "";
     loadCatalog();
   } catch {}
 });
@@ -210,18 +261,27 @@ document.getElementById("s-add-btn").addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         title,
-        genre: document.getElementById("s-genre").value.trim() || null,
+        genre: genreValue("s-genre", "s-genre-outro"),
         year: Number(document.getElementById("s-year").value) || null,
         poster_url: document.getElementById("s-poster").value.trim() || null,
         description: document.getElementById("s-desc").value.trim() || null,
+        season_number: Number(document.getElementById("s-ep-season").value) || null,
+        episode_number: Number(document.getElementById("s-ep-number").value) || null,
+        episode_title: document.getElementById("s-ep-title").value.trim() || null,
+        stream_url: document.getElementById("s-ep-url").value.trim() || null,
       }),
     });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       return setMsg(msg, body.detail || "Falha ao adicionar.", true);
     }
-    setMsg(msg, `"${title}" adicionada — agora adicione os episódios na lista abaixo.`, false);
-    ["s-title", "s-genre", "s-year", "s-poster", "s-desc"].forEach((id) => (document.getElementById(id).value = ""));
+    setMsg(msg, `"${title}" adicionada — mais episódios podem ser incluídos na lista abaixo.`, false);
+    ["s-title", "s-year", "s-poster", "s-desc", "s-ep-season", "s-ep-number", "s-ep-title", "s-ep-url"].forEach(
+      (id) => (document.getElementById(id).value = "")
+    );
+    document.getElementById("s-genre").value = "";
+    document.getElementById("s-genre-outro").hidden = true;
+    document.getElementById("s-genre-outro").value = "";
     loadCatalog();
   } catch {}
 });

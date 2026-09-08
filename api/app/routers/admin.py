@@ -36,6 +36,12 @@ class SeriesRequest(BaseModel):
     poster_url: Optional[str] = None
     genre: Optional[str] = None
     year: Optional[int] = None
+    # opcional: já cria o 1º episódio junto, pra não obrigar 2 passos separados
+    # quando só tem 1 link na mão. Mais episódios sempre dá pra adicionar depois.
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
+    episode_title: Optional[str] = None
+    stream_url: Optional[str] = None
 
 
 class EpisodeRequest(BaseModel):
@@ -164,6 +170,24 @@ def add_series(payload: SeriesRequest, db: Session = Depends(get_db), _admin: Ad
         year=payload.year,
     )
     db.add(title)
+    db.flush()
+
+    # se algum campo de episódio veio preenchido, já cria o 1º episódio junto
+    # (evita o passo extra de ter que descer até o catálogo pra colar o link)
+    has_episode_data = any(
+        v is not None for v in (payload.season_number, payload.episode_number, payload.episode_title, payload.stream_url)
+    )
+    if has_episode_data:
+        db.add(
+            VodItem(
+                title_id=title.id,
+                season_number=payload.season_number,
+                episode_number=payload.episode_number,
+                episode_title=payload.episode_title,
+                stream_url=payload.stream_url,
+            )
+        )
+
     db.commit()
     return {"id": title.id}
 
