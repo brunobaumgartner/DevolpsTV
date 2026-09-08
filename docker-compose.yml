@@ -23,6 +23,8 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
       - "${API_PORT:-7678}:7678"
     volumes:

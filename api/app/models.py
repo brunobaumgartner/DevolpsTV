@@ -104,6 +104,28 @@ class VodItem(Base):
     vod_title = relationship("VodTitle", back_populates="items")
 
 
+class AdminUser(Base):
+    """Login do painel de administração (cadastro de links VOD) — separado do
+    esquema de token-na-URL usado pra consumir a playlist."""
+
+    __tablename__ = "admin_users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(100), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+
+    id = Column(Integer, primary_key=True)
+    session_token = Column(String(64), unique=True, nullable=False)
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
+
+
 class AccessToken(Base):
     __tablename__ = "access_tokens"
 

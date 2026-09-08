@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Login — IPTV-BR</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --text: #e8e8ea;
+    --muted: #8a8f98;
+    --accent: #4f8cff;
+    --border: #2a2e37;
+    --danger: #e5534b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  form {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    width: 300px;
+  }
+  h1 { font-size: 15px; margin: 0 0 18px; color: var(--muted); font-weight: 600; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  input {
+    width: 100%;
+    background: #10131a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  button {
+    width: 100%;
+    margin-top: 18px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #error { color: var(--danger); font-size: 12px; margin-top: 10px; min-height: 14px; }
+</style>
+</head>
+<body>
+<form id="login-form">
+  <h1>IPTV-BR — painel de admin</h1>
+  <label for="username">Usuário</label>
+  <input id="username" name="username" type="text" autocomplete="username" required />
+  <label for="password">Senha</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required />
+  <div id="error"></div>
+  <button type="submit">Entrar</button>
+</form>
+
+<script>
+const form = document.getElementById("login-form");
+const errorEl = document.getElementById("error");
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  errorEl.textContent = "";
+
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+
+  try {
+    const resp = await fetch("admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username, password }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      errorEl.textContent = body.detail || "Falha ao entrar.";
+      return;
+    }
+    window.location.href = "admin.html";
+  } catch {
+    errorEl.textContent = "Falha de rede ao tentar entrar.";
+  }
+});
+</script>
+</body>
+</html>

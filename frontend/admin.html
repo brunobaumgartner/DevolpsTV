@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin — IPTV-BR</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --text: #e8e8ea;
+    --muted: #8a8f98;
+    --accent: #4f8cff;
+    --border: #2a2e37;
+    --danger: #e5534b;
+    --ok: #35c46b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header h1 { font-size: 15px; margin: 0; color: var(--muted); font-weight: 600; flex: 1; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  section h2 { font-size: 13px; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .row > div { flex: 1; min-width: 140px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  input, textarea, select {
+    width: 100%;
+    background: #10131a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 50px; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+  .msg { font-size: 12px; margin-top: 8px; min-height: 14px; }
+  .msg.ok { color: var(--ok); }
+  .msg.error { color: var(--danger); }
+
+  .title-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .title-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .title-card-head strong { font-size: 13px; }
+  .title-card-head .meta { color: var(--muted); font-size: 11px; }
+  .item-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px; }
+  .item-row input { flex: 1; }
+  .item-row .item-label { min-width: 130px; color: var(--muted); }
+  .add-episode-row { display: flex; gap: 6px; margin-top: 8px; }
+  .add-episode-row input { width: 60px; flex: 0 0 auto; }
+  .add-episode-row input.episode-title { flex: 1; width: auto; }
+  .add-episode-row input.episode-url { flex: 2; width: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IPTV-BR — cadastro de filmes e séries</h1>
+  <button class="secondary" id="logout-btn">Sair</button>
+</header>
+
+<main>
+  <section>
+    <h2>Adicionar filme</h2>
+    <div class="row">
+      <div><label>Título *</label><input id="m-title" /></div>
+      <div><label>Gênero</label><input id="m-genre" /></div>
+      <div><label>Ano</label><input id="m-year" type="number" /></div>
+    </div>
+    <div class="row">
+      <div><label>Poster (URL)</label><input id="m-poster" /></div>
+      <div><label>Link do stream (opcional — pode deixar em branco)</label><input id="m-url" /></div>
+    </div>
+    <div class="row"><div><label>Descrição</label><textarea id="m-desc"></textarea></div></div>
+    <button id="m-add-btn">Adicionar filme</button>
+    <div class="msg" id="m-msg"></div>
+  </section>
+
+  <section>
+    <h2>Adicionar série</h2>
+    <div class="row">
+      <div><label>Título *</label><input id="s-title" /></div>
+      <div><label>Gênero</label><input id="s-genre" /></div>
+      <div><label>Ano</label><input id="s-year" type="number" /></div>
+    </div>
+    <div class="row">
+      <div><label>Poster (URL)</label><input id="s-poster" /></div>
+    </div>
+    <div class="row"><div><label>Descrição</label><textarea id="s-desc"></textarea></div></div>
+    <button id="s-add-btn">Adicionar série (episódios depois, na lista abaixo)</button>
+    <div class="msg" id="s-msg"></div>
+  </section>
+
+  <section>
+    <h2>Importar CSV (vários títulos de uma vez)</h2>
+    <p style="color: var(--muted); font-size: 12px; margin-top: 0;">
+      Mesmo formato do <code>data/titulos.exemplo.csv</code> do repositório. Idempotente —
+      subir de novo com o mesmo arquivo (ou uma versão com mais links preenchidos) atualiza
+      em vez de duplicar, e célula de link em branco nunca apaga um link já salvo.
+    </p>
+    <div class="row">
+      <div style="flex: 0 0 auto;"><input type="file" id="csv-file" accept=".csv,text/csv" /></div>
+      <div style="flex: 0 0 auto;"><button id="csv-upload-btn">Importar</button></div>
+    </div>
+    <div class="msg" id="csv-msg"></div>
+  </section>
+
+  <section>
+    <h2>Catálogo</h2>
+    <div id="catalog-list"></div>
+  </section>
+</main>
+
+<script>
+async function checkSession() {
+  const resp = await fetch("admin/me", { credentials: "include" });
+  if (!resp.ok) {
+    window.location.href = "login.html";
+    return false;
+  }
+  return true;
+}
+
+document.getElementById("logout-btn").addEventListener("click", async () => {
+  await fetch("admin/logout", { method: "POST", credentials: "include" }).catch(() => {});
+  window.location.href = "login.html";
+});
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
+function setMsg(el, text, isError) {
+  el.textContent = text;
+  el.className = "msg " + (isError ? "error" : "ok");
+}
+
+async function apiFetch(path, options = {}) {
+  const resp = await fetch(path, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (resp.status === 401) {
+    window.location.href = "login.html";
+    throw new Error("não autenticado");
+  }
+  return resp;
+}
+
+document.getElementById("m-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("m-msg");
+  const title = document.getElementById("m-title").value.trim();
+  if (!title) return setMsg(msg, "Título é obrigatório.", true);
+
+  try {
+    const resp = await apiFetch("admin/vod/movie", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        genre: document.getElementById("m-genre").value.trim() || null,
+        year: Number(document.getElementById("m-year").value) || null,
+        poster_url: document.getElementById("m-poster").value.trim() || null,
+        stream_url: document.getElementById("m-url").value.trim() || null,
+        description: document.getElementById("m-desc").value.trim() || null,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      return setMsg(msg, body.detail || "Falha ao adicionar.", true);
+    }
+    setMsg(msg, `"${title}" adicionado.`, false);
+    ["m-title", "m-genre", "m-year", "m-poster", "m-url", "m-desc"].forEach((id) => (document.getElementById(id).value = ""));
+    loadCatalog();
+  } catch {}
+});
+
+document.getElementById("s-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("s-msg");
+  const title = document.getElementById("s-title").value.trim();
+  if (!title) return setMsg(msg, "Título é obrigatório.", true);
+
+  try {
+    const resp = await apiFetch("admin/vod/series", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        genre: document.getElementById("s-genre").value.trim() || null,
+        year: Number(document.getElementById("s-year").value) || null,
+        poster_url: document.getElementById("s-poster").value.trim() || null,
+        description: document.getElementById("s-desc").value.trim() || null,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      return setMsg(msg, body.detail || "Falha ao adicionar.", true);
+    }
+    setMsg(msg, `"${title}" adicionada — agora adicione os episódios na lista abaixo.`, false);
+    ["s-title", "s-genre", "s-year", "s-poster", "s-desc"].forEach((id) => (document.getElementById(id).value = ""));
+    loadCatalog();
+  } catch {}
+});
+
+document.getElementById("csv-upload-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("csv-msg");
+  const fileInput = document.getElementById("csv-file");
+  const file = fileInput.files[0];
+  if (!file) return setMsg(msg, "Escolha um arquivo CSV primeiro.", true);
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    // upload de arquivo usa multipart/form-data — o navegador define o
+    // Content-Type (com boundary) sozinho, por isso não passamos headers aqui
+    const resp = await fetch("admin/vod/import-csv", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    if (resp.status === 401) {
+      window.location.href = "login.html";
+      return;
+    }
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return setMsg(msg, body.detail || "Falha ao importar.", true);
+    }
+    const ignoradas = body.linhas_ignoradas?.length ? `, ${body.linhas_ignoradas.length} linha(s) ignorada(s)` : "";
+    setMsg(
+      msg,
+      `Importado: ${body.titulos_novos} título(s) novo(s), ${body.titulos_atualizados} atualizado(s), ${body.itens_novos} item(ns) novo(s), ${body.itens_atualizados} atualizado(s)${ignoradas}.`,
+      false
+    );
+    fileInput.value = "";
+    loadCatalog();
+  } catch {
+    setMsg(msg, "Falha de rede ao importar.", true);
+  }
+});
+
+async function loadCatalog() {
+  const listEl = document.getElementById("catalog-list");
+  try {
+    const resp = await apiFetch("admin/vod");
+    const data = await resp.json();
+    if (!data.titles.length) {
+      listEl.innerHTML = `<div class="msg">Nada cadastrado ainda.</div>`;
+      return;
+    }
+    listEl.innerHTML = "";
+    data.titles.forEach((t) => listEl.appendChild(renderTitleCard(t)));
+  } catch {}
+}
+
+function renderTitleCard(t) {
+  const card = document.createElement("div");
+  card.className = "title-card";
+
+  const head = document.createElement("div");
+  head.className = "title-card-head";
+  head.innerHTML = `
+    <div><strong>${escapeHtml(t.title)}</strong> <span class="meta">(${t.type === "movie" ? "filme" : "série"}${t.genre ? " · " + escapeHtml(t.genre) : ""}${t.year ? " · " + t.year : ""})</span></div>
+  `;
+  const delTitleBtn = document.createElement("button");
+  delTitleBtn.className = "danger";
+  delTitleBtn.textContent = "Excluir título";
+  delTitleBtn.addEventListener("click", async () => {
+    if (!confirm(`Excluir "${t.title}" e todos os episódios?`)) return;
+    await apiFetch(`admin/vod/titles/${t.id}`, { method: "DELETE" });
+    loadCatalog();
+  });
+  head.appendChild(delTitleBtn);
+  card.appendChild(head);
+
+  t.items.forEach((item) => card.appendChild(renderItemRow(t, item)));
+
+  if (t.type === "series") {
+    const addRow = document.createElement("div");
+    addRow.className = "add-episode-row";
+    addRow.innerHTML = `
+      <input type="number" placeholder="Temp." class="ep-season" />
+      <input type="number" placeholder="Ep." class="ep-episode" />
+      <input type="text" placeholder="Nome do episódio" class="episode-title ep-title" />
+      <input type="text" placeholder="Link (opcional)" class="episode-url ep-url" />
+    `;
+    const addBtn = document.createElement("button");
+    addBtn.className = "secondary";
+    addBtn.textContent = "+ Episódio";
+    addBtn.addEventListener("click", async () => {
+      await apiFetch(`admin/vod/${t.id}/episodes`, {
+        method: "POST",
+        body: JSON.stringify({
+          season_number: Number(addRow.querySelector(".ep-season").value) || null,
+          episode_number: Number(addRow.querySelector(".ep-episode").value) || null,
+          episode_title: addRow.querySelector(".ep-title").value.trim() || null,
+          stream_url: addRow.querySelector(".ep-url").value.trim() || null,
+        }),
+      });
+      loadCatalog();
+    });
+    addRow.appendChild(addBtn);
+    card.appendChild(addRow);
+  }
+
+  return card;
+}
+
+function renderItemRow(title, item) {
+  const row = document.createElement("div");
+  row.className = "item-row";
+
+  const label = title.type === "series" ? `T${item.season_number ?? "?"}E${item.episode_number ?? "?"} ${item.episode_title || ""}` : "Link do filme";
+
+  const urlInput = document.createElement("input");
+  urlInput.type = "text";
+  urlInput.placeholder = "sem link ainda";
+  urlInput.value = item.stream_url || "";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "secondary";
+  saveBtn.textContent = "Salvar";
+  saveBtn.addEventListener("click", async () => {
+    await apiFetch(`admin/vod/items/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ stream_url: urlInput.value.trim() || null }),
+    });
+    saveBtn.textContent = "Salvo ✓";
+    setTimeout(() => (saveBtn.textContent = "Salvar"), 1500);
+  });
+
+  const delBtn = document.createElement("button");
+  delBtn.className = "danger";
+  delBtn.textContent = "×";
+  delBtn.title = "Remover episódio";
+  delBtn.style.display = title.type === "series" ? "" : "none";
+  delBtn.addEventListener("click", async () => {
+    await apiFetch(`admin/vod/items/${item.id}`, { method: "DELETE" });
+    loadCatalog();
+  });
+
+  const labelEl = document.createElement("span");
+  labelEl.className = "item-label";
+  labelEl.textContent = label;
+
+  row.appendChild(labelEl);
+  row.appendChild(urlInput);
+  row.appendChild(saveBtn);
+  row.appendChild(delBtn);
+  return row;
+}
+
+(async () => {
+  if (await checkSession()) loadCatalog();
+})();
+</script>
+</body>
+</html>

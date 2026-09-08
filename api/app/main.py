@@ -6,10 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .config import FRONTEND_DIR
+from .auth_admin import hash_password
+from .config import ADMIN_PASSWORD, ADMIN_USERNAME, FRONTEND_DIR
 from .db import Base, SessionLocal, engine
-from .models import AccessToken
-from .routers import channels, health, playlist, vod
+from .models import AccessToken, AdminUser
+from .routers import admin, channels, health, playlist, vod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("iptv-api")
@@ -29,12 +30,14 @@ app.include_router(health.router)
 app.include_router(playlist.router)
 app.include_router(channels.router)
 app.include_router(vod.router)
+app.include_router(admin.router)
 
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
     _ensure_dev_token()
+    _ensure_admin_user()
 
 
 def _ensure_dev_token():
@@ -53,6 +56,41 @@ def _ensure_dev_token():
         logger.warning(token)
         logger.warning("Use em: http://localhost:%s/p/%s/playlist.m3u8", os.environ.get("API_PORT", "7678"), token)
         logger.warning("=" * 60)
+    finally:
+        db.close()
+
+
+def _ensure_admin_user():
+    """O .env é a fonte de verdade pro usuário/senha do admin: se ADMIN_PASSWORD
+    estiver definido lá, o hash é recalculado a cada subida (trocar a senha no
+    .env e reiniciar já basta). Se não tiver ADMIN_PASSWORD configurado e ainda
+    não existir usuário nenhum, gera uma senha aleatória só pra não travar o
+    primeiro uso (mesmo padrão do token de playlist)."""
+    db = SessionLocal()
+    try:
+        existing = db.query(AdminUser).filter(AdminUser.username == ADMIN_USERNAME).first()
+
+        # docker-compose com "${ADMIN_PASSWORD:-}" gera string VAZIA quando a
+        # variável não existe no .env — não None. "not password" cobre os dois
+        # casos (variável ausente E variável vazia).
+        password = ADMIN_PASSWORD
+        if not password:
+            if existing is not None:
+                return  # já existe usuário e não foi passada senha nova via env — não mexe
+            password = secrets.token_urlsafe(12)
+            logger.warning("=" * 60)
+            logger.warning("ADMIN_PASSWORD não definido no .env. Senha de admin gerada:")
+            logger.warning("usuário: %s", ADMIN_USERNAME)
+            logger.warning("senha:   %s", password)
+            logger.warning("Defina ADMIN_USERNAME/ADMIN_PASSWORD no .env pra usar sua própria senha.")
+            logger.warning("=" * 60)
+
+        password_hash = hash_password(password)
+        if existing is None:
+            db.add(AdminUser(username=ADMIN_USERNAME, password_hash=password_hash))
+        else:
+            existing.password_hash = password_hash
+        db.commit()
     finally:
         db.close()
 
