@@ -1,0 +1,57 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - iptv_mysql_data:/var/lib/mysql
+      - ./mysql/migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - iptv_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+    ports:
+      - "${API_PORT:-7678}:7678"
+    volumes:
+      - ./frontend:/app/frontend:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - iptv_net
+      # necessária pro nginx do projeto "exposite" (já existente na VPS) conseguir
+      # fazer proxy reverso pra essa API — ver ARQUITETURA.md secao 6
+      - exposite_rede_exposite
+
+  worker:
+    build: ./worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - iptv_net
+
+networks:
+  iptv_net:
+    driver: bridge
+  exposite_rede_exposite:
+    external: true
+
+volumes:
+  iptv_mysql_data:

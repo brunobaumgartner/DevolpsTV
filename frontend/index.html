@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IPTV-BR (teste)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --text: #e8e8ea;
+    --muted: #8a8f98;
+    --accent: #4f8cff;
+    --border: #2a2e37;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; margin-right: auto; color: var(--muted); font-weight: 600; }
+  input[type="text"] {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    width: 320px;
+    font-size: 13px;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.secondary {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  video { width: 100%; background: black; border-radius: 8px; aspect-ratio: 16/9; }
+  #status { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .categories { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .cat-btn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .cat-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .channel-list { max-height: 70vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .channel-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .channel-item:hover { background: var(--card); }
+  .channel-item.playing { background: #22304f; }
+  .channel-item img { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: #222; }
+  .channel-item .name { flex: 1; }
+  .channel-item .badge {
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .channel-item .now-playing {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+  #epg-panel { margin-top: 14px; }
+  #epg-panel h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .epg-item { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .epg-item:last-child { border-bottom: none; }
+  .epg-item .time { color: var(--muted); white-space: nowrap; min-width: 40px; }
+  .epg-item.current .time { color: var(--accent); font-weight: 600; }
+  .epg-item .title { flex: 1; }
+  .epg-item.current .title { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IPTV-BR — painel de teste</h1>
+  <input id="token" type="text" placeholder="cole seu token de acesso aqui" />
+  <button id="load-btn">Carregar canais</button>
+</header>
+
+<main>
+  <section>
+    <video id="player" controls autoplay muted></video>
+    <div id="status">Nenhum canal carregado ainda.</div>
+    <div id="epg-panel"></div>
+  </section>
+
+  <section>
+    <div class="categories" id="categories"></div>
+    <div class="channel-list" id="channel-list"></div>
+  </section>
+</main>
+
+<script>
+const tokenInput = document.getElementById("token");
+const loadBtn = document.getElementById("load-btn");
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("channel-list");
+const categoriesEl = document.getElementById("categories");
+const video = document.getElementById("player");
+
+let allChannels = [];
+let activeCategory = null;
+let hls = null;
+let currentToken = null;
+let playRequestId = 0; // evita que uma verificação antiga sobrescreva um clique mais novo
+
+// lembra o token no navegador do usuário (não sai daqui, é só localStorage).
+// Em aba anônima ou contexto sandboxed o localStorage pode não existir — não deve
+// quebrar a página por causa disso.
+function safeLocalStorage() {
+  try {
+    localStorage.setItem("__test__", "1");
+    localStorage.removeItem("__test__");
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+const storage = safeLocalStorage();
+
+tokenInput.value = (storage && storage.getItem("iptv_token")) || "";
+
+loadBtn.addEventListener("click", loadChannels);
+tokenInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadChannels(); });
+
+async function loadChannels() {
+  const token = tokenInput.value.trim();
+  if (!token) {
+    statusEl.textContent = "Cole um token válido primeiro.";
+    return;
+  }
+  if (storage) storage.setItem("iptv_token", token);
+  currentToken = token;
+  statusEl.textContent = "Carregando...";
+
+  try {
+    // caminho relativo (sem "/" no início) pra funcionar tanto na raiz quanto
+    // atrás de um proxy reverso num subpath (ex: /iptv/)
+    const resp = await fetch(`p/${encodeURIComponent(token)}/channels.json`);
+    if (resp.status === 404) {
+      statusEl.textContent = "Token inválido.";
+      return;
+    }
+    if (!resp.ok) {
+      statusEl.textContent = `Erro ao carregar (HTTP ${resp.status}).`;
+      return;
+    }
+    const data = await resp.json();
+    allChannels = data.channels || [];
+    statusEl.textContent = `${allChannels.length} canais ativos.`;
+    renderCategories();
+    renderList();
+  } catch (err) {
+    statusEl.textContent = "Falha de rede ao carregar canais.";
+    console.error(err);
+  }
+}
+
+function renderCategories() {
+  const cats = Array.from(new Set(allChannels.map((c) => c.category || "outros"))).sort();
+  categoriesEl.innerHTML = "";
+  const allBtn = makeCategoryButton("Todos", null);
+  categoriesEl.appendChild(allBtn);
+  cats.forEach((cat) => categoriesEl.appendChild(makeCategoryButton(cat, cat)));
+}
+
+function makeCategoryButton(label, value) {
+  const btn = document.createElement("button");
+  btn.className = "cat-btn" + (activeCategory === value ? " active" : "");
+  btn.textContent = label;
+  btn.addEventListener("click", () => {
+    activeCategory = value;
+    renderCategories();
+    renderList();
+  });
+  return btn;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
+function renderList() {
+  const filtered = activeCategory
+    ? allChannels.filter((c) => (c.category || "outros") === activeCategory)
+    : allChannels;
+
+  listEl.innerHTML = "";
+  filtered.forEach((ch) => {
+    const item = document.createElement("div");
+    item.className = "channel-item";
+    const nowPlayingHtml = ch.now_playing
+      ? `<span class="now-playing">▶ ${escapeHtml(ch.now_playing.title)}</span>`
+      : "";
+    item.innerHTML = `
+      ${ch.logo_url ? `<img src="${escapeHtml(ch.logo_url)}" alt="" onerror="this.style.visibility='hidden'">` : `<div style="width:28px"></div>`}
+      <span class="name">${escapeHtml(ch.name)}${nowPlayingHtml}</span>
+      ${ch.is_broadcast_tv ? '<span class="badge">TV aberta</span>' : ""}
+    `;
+    item.addEventListener("click", () => playChannel(ch, item));
+    listEl.appendChild(item);
+  });
+}
+
+function formatTime(isoString) {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadEpgPanel(channel) {
+  const panel = document.getElementById("epg-panel");
+  panel.innerHTML = "";
+  try {
+    const resp = await fetch(
+      `p/${encodeURIComponent(currentToken)}/channels/${encodeURIComponent(channel.tvg_id)}/epg`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.has_epg || !data.programs.length) return;
+
+    const now = new Date();
+    const items = data.programs
+      .slice(0, 6)
+      .map((p) => {
+        const isCurrent = new Date(p.starts_at) <= now && new Date(p.ends_at) > now;
+        return `
+        <div class="epg-item ${isCurrent ? "current" : ""}">
+          <span class="time">${formatTime(p.starts_at)}</span>
+          <span class="title">${escapeHtml(p.title)}</span>
+        </div>`;
+      })
+      .join("");
+    panel.innerHTML = `<h2>Programação — ${escapeHtml(channel.name)}</h2>${items}`;
+  } catch {
+    // EPG é um extra — falha aqui não deve incomodar quem só quer assistir
+  }
+}
+
+async function playChannel(channel, itemEl) {
+  document.querySelectorAll(".channel-item.playing").forEach((el) => el.classList.remove("playing"));
+  itemEl.classList.add("playing");
+  loadEpgPanel(channel);
+
+  const myRequestId = ++playRequestId;
+  statusEl.textContent = `Verificando "${channel.name}"...`;
+
+  // Verificação ao vivo no servidor: o cache do health-check (a cada 15min) não é
+  // confiável o suficiente com fontes tão instáveis quanto essas — confirma agora.
+  let liveUrl = null;
+  try {
+    const resp = await fetch(
+      `p/${encodeURIComponent(currentToken)}/channels/${encodeURIComponent(channel.tvg_id)}/resolve`
+    );
+    if (myRequestId !== playRequestId) return; // usuário já clicou em outro canal enquanto isso
+
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      statusEl.textContent = body.detail || `"${channel.name}" está indisponível agora.`;
+      return;
+    }
+    const data = await resp.json();
+    liveUrl = data.url;
+  } catch (err) {
+    if (myRequestId !== playRequestId) return;
+    statusEl.textContent = `Falha de rede ao verificar "${channel.name}".`;
+    return;
+  }
+
+  // além do mirror já confirmado ao vivo, mantém os outros conhecidos como
+  // reserva (defesa extra caso ele caia nos segundos entre a checagem e o play)
+  const fallbacks = (channel.stream_urls || []).filter((u) => u !== liveUrl);
+  tryMirror(channel, [liveUrl, ...fallbacks], 0);
+}
+
+function reportFailure(channel, url) {
+  // best-effort: não bloqueia a UI nem trata erro — é só telemetria pro backend
+  // parar de oferecer esse mirror pros próximos usuários (ver ARQUITETURA.md 8.2)
+  fetch(`p/${encodeURIComponent(currentToken)}/channels/${encodeURIComponent(channel.tvg_id)}/report-failure`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  }).catch(() => {});
+}
+
+function removeChannelFromList(channel) {
+  allChannels = allChannels.filter((c) => c.tvg_id !== channel.tvg_id);
+  renderCategories();
+  renderList();
+}
+
+function tryMirror(channel, mirrors, index) {
+  if (index >= mirrors.length) {
+    statusEl.textContent = `"${channel.name}" foi removido da lista: nenhum dos ${mirrors.length} servidor(es) tocou de verdade no seu navegador, mesmo aprovado na verificação do servidor.`;
+    removeChannelFromList(channel);
+    return;
+  }
+
+  statusEl.textContent =
+    mirrors.length > 1
+      ? `Reproduzindo: ${channel.name} (servidor ${index + 1}/${mirrors.length})`
+      : `Reproduzindo: ${channel.name}`;
+
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+
+  const url = mirrors[index];
+  const goToNextMirror = () => {
+    reportFailure(channel, url);
+    tryMirror(channel, mirrors, index + 1);
+  };
+
+  if (Hls.isSupported()) {
+    hls = new Hls();
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (_evt, data) => {
+      if (data.fatal) {
+        goToNextMirror();
+      }
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = url;
+    video.onerror = goToNextMirror;
+  } else {
+    statusEl.textContent = "Seu navegador não suporta HLS.";
+  }
+}
+</script>
+</body>
+</html>
