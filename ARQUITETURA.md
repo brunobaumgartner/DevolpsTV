@@ -190,6 +190,27 @@ Em 2026-09-08 o usuário pediu pra incluir filmes e séries **sob demanda** (esc
 - Frontend: aba "Filmes e Séries" com grid de pôsteres; título sem link mostra badge "sem link ainda"; série abre lista de episódios, só os com link são clicáveis
 - Testado com dados temporários (inseridos, verificados, removidos) — catálogo real começa e permanece vazio
 
+### 9.1 Painel de login e cadastro (2026-09-08)
+
+Além do CSV (seção anterior), foi adicionado um painel web pra cadastrar
+título/link sem precisar copiar arquivo pra VPS: `/login.html` → `/admin.html`.
+
+- **Autenticação separada** da playlist: usuário/senha + sessão por cookie
+  (`admin_users`/`admin_sessions`, hash PBKDF2-SHA256), porque cadastrar link é
+  uma capacidade de **escrita** — o token-na-URL da playlist é só leitura e não
+  seria apropriado pra isso
+- Credenciais vêm do `.env` (`ADMIN_USERNAME`/`ADMIN_PASSWORD`), recriadas a
+  cada subida da API; sem senha configurada, uma é gerada e logada (mesmo
+  padrão do token de playlist)
+- O painel cobre: adicionar filme/série, adicionar episódio, editar/excluir
+  link de qualquer item, excluir título — e também **upload de CSV direto pelo
+  navegador** (mesma lógica idempotente do `import_vod.py`, reaproveitada via
+  `import_rows_from_text`)
+- Bug real encontrado e corrigido antes de considerar pronto: `docker-compose`
+  com `${ADMIN_PASSWORD:-}` gera string **vazia** (não ausente) quando a
+  variável não existe no `.env` — o código checava só `is None` e acabou
+  hasheando senha vazia sem avisar. Corrigido pra `not password`.
+
 ## 10. Segurança
 
 1. **Exposição:** por ora, **IP direto da VPS na porta 7678** (decisão temporária, sem domínio ainda — ver seção 6). Plano original era Cloudflare Tunnel (sem porta pública aberta); migrar pra isso quando houver domínio definido
