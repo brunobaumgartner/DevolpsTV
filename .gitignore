@@ -9,3 +9,7 @@ venv/
 # você não necessariamente quer versionados — só o exemplo fica no repo
 data/*.csv
 !data/titulos.exemplo.csv
+
+# dataset publico do IMDb (title.basics.tsv.gz + title.akas.tsv.gz) usado pelo
+# classificador de genero — baixado manualmente (~750MB juntos), nunca vai pro git
+data/imdb/

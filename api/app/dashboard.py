@@ -45,6 +45,24 @@ def get_dashboard_stats(db: Session) -> dict:
     total_vod_items = db.query(func.count(VodItem.id)).scalar() or 0
     vod_items_with_link = db.query(func.count(VodItem.id)).filter(VodItem.stream_url.isnot(None)).scalar() or 0
 
+    movies_by_genre_rows = (
+        db.query(VodTitle.genre, func.count(VodTitle.id))
+        .filter(VodTitle.type == "movie")
+        .group_by(VodTitle.genre)
+        .order_by(func.count(VodTitle.id).desc())
+        .all()
+    )
+    movies_by_genre = [{"genre": g or "sem gênero", "count": c} for g, c in movies_by_genre_rows]
+
+    series_by_genre_rows = (
+        db.query(VodTitle.genre, func.count(VodTitle.id))
+        .filter(VodTitle.type == "series")
+        .group_by(VodTitle.genre)
+        .order_by(func.count(VodTitle.id).desc())
+        .all()
+    )
+    series_by_genre = [{"genre": g or "sem gênero", "count": c} for g, c in series_by_genre_rows]
+
     active_tokens = db.query(func.count(AccessToken.id)).filter(AccessToken.is_active.is_(True)).scalar() or 0
 
     worker_runs = db.query(WorkerRun).all()
@@ -85,6 +103,8 @@ def get_dashboard_stats(db: Session) -> dict:
             "series": vod_series,
             "total_items": total_vod_items,
             "items_with_link": vod_items_with_link,
+            "movies_by_genre": movies_by_genre,
+            "series_by_genre": series_by_genre,
         },
         "access_tokens": active_tokens,
         "worker_jobs": jobs,

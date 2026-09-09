@@ -2,6 +2,7 @@
 séries) via formulário web, além do importador CSV (api/app/import_vod.py,
 continua existindo pra cargas em lote)."""
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
@@ -9,10 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth_admin import SESSION_COOKIE_NAME, create_session, require_admin, verify_password
+from ..channel_classifier import get_classify_channels_job, start_classify_channels_job
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
 from ..genre_classifier import get_classify_job, start_classify_job
 from ..import_vod import get_import_job, start_import_job
+from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle
 
 router = APIRouter(prefix="/admin")
@@ -56,6 +59,10 @@ class EpisodeRequest(BaseModel):
 class UpdateItemRequest(BaseModel):
     stream_url: Optional[str] = None
     episode_title: Optional[str] = None
+
+
+class SetGenreRequest(BaseModel):
+    genre: str
 
 
 class LiveChannelRequest(BaseModel):
@@ -278,6 +285,46 @@ def update_item(
     return {"ok": True}
 
 
+@router.get("/vod/titles-without-genre")
+def list_titles_without_genre(
+    type: str,  # noqa: A002 - nome claro pro cliente, mesmo sombreando o builtin
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Lista paginada de títulos (filme OU série, conforme `type`) sem gênero —
+    alimenta a tela de classificação manual aberta ao clicar em 'sem gênero'
+    nos gráficos do dashboard. Não inclui os itens/episódios: é só pra
+    escolher o gênero, não pra editar o catálogo (isso já existe em
+    admin.html)."""
+    if type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="type deve ser 'movie' ou 'series'")
+
+    query = db.query(VodTitle).filter(VodTitle.type == type, VodTitle.genre.is_(None))
+    total = query.count()
+    titles = query.order_by(VodTitle.id).offset(offset).limit(min(limit, 200)).all()
+    return {
+        "total": total,
+        "titles": [{"id": t.id, "title": t.title, "year": t.year} for t in titles],
+    }
+
+
+@router.patch("/vod/titles/{title_id}/genre")
+def set_title_genre(
+    title_id: int,
+    payload: SetGenreRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    title = db.query(VodTitle).filter(VodTitle.id == title_id).first()
+    if title is None:
+        raise HTTPException(status_code=404, detail="Título não encontrado")
+    title.genre = payload.genre
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/vod/titles/{title_id}")
 def delete_title(title_id: int, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
     title = db.query(VodTitle).filter(VodTitle.id == title_id).first()
@@ -411,3 +458,75 @@ def classify_genres_status(job_id: str, _admin: AdminUser = Depends(require_admi
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
     return job
+
+
+@router.post("/healthcheck")
+def run_healthcheck(_admin: AdminUser = Depends(require_admin)):
+    """Dispara em background: testa TODOS os streams cadastrados agora, sem
+    esperar o próximo ciclo automático do worker (a cada
+    HEALTHCHECK_INTERVAL_MIN). Grava o resultado nos streams e também em
+    worker_runs, então some como mais uma rodada de 'healthcheck' no painel."""
+    job_id = start_healthcheck_job()
+    return {"job_id": job_id}
+
+
+@router.get("/healthcheck/{job_id}/status")
+def healthcheck_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_healthcheck_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
+    return job
+
+
+@router.post("/channels/classify-categories")
+def classify_channel_categories(_admin: AdminUser = Depends(require_admin)):
+    """Dispara em background: classifica por palavra-chave no nome todo canal
+    com category NULL/vazia. Nunca sobrescreve categoria já preenchida (nem a
+    que vem do iptv-org, nem uma classificação anterior)."""
+    job_id = start_classify_channels_job()
+    return {"job_id": job_id}
+
+
+@router.get("/channels/classify-categories/{job_id}/status")
+def classify_channel_categories_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_classify_channels_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
+    return job
+
+
+@router.get("/streams")
+def list_streams(
+    healthy: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Lista streams com o canal dono, pro modal de 'saudáveis vs não
+    saudáveis' do dashboard. `healthy=true`/`false` filtra; sem o parâmetro
+    devolve todos.
+
+    A idade de `last_checked_at` é calculada AQUI, não no frontend: a coluna é
+    um datetime "naive" (sem timezone, sempre UTC por convenção — mesmo padrão
+    de WorkerRun.last_run_at em dashboard.py). Se devolvêssemos o isoformat()
+    puro, o `new Date(...)` do JS no navegador interpretaria como horário
+    LOCAL do usuário, não UTC, e a idade apareceria errada."""
+    query = db.query(Stream).options(joinedload(Stream.channel))
+    if healthy is not None:
+        query = query.filter(Stream.is_healthy.is_(healthy))
+    streams = query.order_by(Stream.channel_id).all()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return {
+        "streams": [
+            {
+                "id": s.id,
+                "url": s.url,
+                "is_healthy": s.is_healthy,
+                "consecutive_failures": s.consecutive_failures,
+                "checked_age_seconds": (now - s.last_checked_at).total_seconds() if s.last_checked_at else None,
+                "channel_id": s.channel_id,
+                "channel_name": s.channel.name if s.channel else None,
+                "channel_tvg_id": s.channel.tvg_id if s.channel else None,
+            }
+            for s in streams
+        ]
+    }

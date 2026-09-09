@@ -15,6 +15,17 @@ configurado, etc.), `resp.text` trava ou demora minutos por request — e com
 centenas de streams testados em paralelo isso já foi o suficiente pra travar
 o health-check inteiro por 6+ minutos num teste real. Por isso lemos só um
 prefixo limitado (`_MAX_MANIFEST_BYTES`) via streaming em vez do corpo todo.
+
+Causa raiz #3 (confirmada 2026-09-09): nem todo link é uma playlist .m3u8 —
+alguns apontam direto pra um transport stream .ts bruto e contínuo, sem
+manifesto por cima. Isso é um formato válido de IPTV, mas antes essa função
+exigia `#EXTM3U` sempre e rejeitava esses links como se estivessem quebrados.
+Agora, quando o corpo não é um m3u8, checa se parece MPEG-TS de verdade
+(Content-Type e/ou os sync bytes do próprio conteúdo) antes de rejeitar.
+
+Cópia da lógica de api/app/stream_validation.py — duplicada de propósito
+porque API e worker são serviços/imagens Docker separados (ver ARQUITETURA.md
+seção 6). Qualquer correção aqui precisa ser espelhada lá.
 """
 
 from urllib.parse import urljoin
@@ -25,8 +36,16 @@ import requests
 # coisa maior que isso não é o que estamos procurando, então paramos de ler
 _MAX_MANIFEST_BYTES = 64 * 1024
 
+# cada pacote MPEG-TS começa com o "sync byte" 0x47 a cada 188 bytes — checar
+# se ele se repete é o jeito padrão de reconhecer um transport stream bruto
+# sem depender só do Content-Type (que varia muito entre servidores de IPTV:
+# video/mp2t, application/octet-stream, ou às vezes nenhum)
+_TS_PACKET_SIZE = 188
+_TS_SYNC_BYTE = 0x47
+_TS_PACKETS_TO_CHECK = 8
 
-def _read_bounded_text(resp: requests.Response) -> str:
+
+def _read_bounded(resp: requests.Response) -> bytes:
     """Lê no máximo _MAX_MANIFEST_BYTES do corpo da resposta, sem nunca tentar
     baixar tudo (proteção contra URLs que na prática são streams contínuos)."""
     chunks = []
@@ -38,8 +57,7 @@ def _read_bounded_text(resp: requests.Response) -> str:
         total += len(chunk)
         if total >= _MAX_MANIFEST_BYTES:
             break
-    raw = b"".join(chunks)
-    return raw.decode("utf-8", errors="replace")
+    return b"".join(chunks)
 
 
 def _first_variant_uri(manifest_text: str) -> str | None:
@@ -55,33 +73,66 @@ def _first_variant_uri(manifest_text: str) -> str | None:
     return None
 
 
-def _get_manifest(url: str, timeout: float, headers: dict | None) -> str | None:
-    """GET com corpo limitado. None se a request falhar ou o status for erro."""
+def _looks_like_raw_mpeg_ts(data: bytes) -> bool:
+    """Confirma pacotes MPEG-TS pelo sync byte 0x47 repetindo a cada 188 bytes.
+    Exige pelo menos 2 pacotes pra não confundir um arquivo qualquer cujo 1º
+    byte por acaso seja 0x47 com um transport stream de verdade."""
+    packet_count = len(data) // _TS_PACKET_SIZE
+    if packet_count < 2:
+        return False
+    checked = min(packet_count, _TS_PACKETS_TO_CHECK)
+    return all(data[i * _TS_PACKET_SIZE] == _TS_SYNC_BYTE for i in range(checked))
+
+
+def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | None, bytes] | None:
+    """GET com corpo limitado. None se a request falhar ou o status for erro;
+    senão (Content-Type, corpo bruto)."""
     try:
         with requests.get(url, headers=headers, timeout=timeout, stream=True) as resp:
             if resp.status_code >= 400:
                 return None
-            return _read_bounded_text(resp)
+            return resp.headers.get("Content-Type"), _read_bounded(resp)
     except requests.RequestException:
         return None
 
 
+def _get_manifest_text(url: str, timeout: float, headers: dict | None) -> str | None:
+    """Igual a _get_body, mas já decodificado — usado só pra buscar a
+    sub-playlist de uma variante, que é sempre texto m3u8."""
+    result = _get_body(url, timeout, headers)
+    if result is None:
+        return None
+    _, data = result
+    return data.decode("utf-8", errors="replace")
+
+
 def stream_is_really_playable(url: str, timeout: float, headers: dict | None = None) -> bool:
-    """True só se a cadeia de manifestos até o nível final (sem mais variantes)
-    responder com um M3U8 válido. Segue no máximo 1 nível de master->variante
-    (suficiente pro padrão HLS comum: raiz = master, variante = media playlist).
-    O token da sub-playlist pode ser de curta duração/uso único em alguns
-    servidores — por isso os dois GETs acontecem em sequência imediata, sem
-    nenhuma pausa entre eles."""
-    text = _get_manifest(url, timeout, headers)
-    if text is None or not text.lstrip().startswith("#EXTM3U"):
+    """True se a cadeia de manifestos até o nível final responder com um M3U8
+    válido, OU se a URL for um transport stream .ts bruto de verdade (sem
+    manifesto por cima). Segue no máximo 1 nível de master->variante
+    (suficiente pro padrão HLS comum: raiz = master, variante = media
+    playlist). O token da sub-playlist pode ser de curta duração/uso único em
+    alguns servidores — por isso os dois GETs acontecem em sequência imediata,
+    sem nenhuma pausa entre eles."""
+    result = _get_body(url, timeout, headers)
+    if result is None:
         return False
+    content_type, data = result
+    text = data.decode("utf-8", errors="replace")
 
-    variant = _first_variant_uri(text)
-    if variant is None:
-        # já é a media playlist final (tem os segmentos), não master
+    if text.lstrip().startswith("#EXTM3U"):
+        variant = _first_variant_uri(text)
+        if variant is None:
+            # já é a media playlist final (tem os segmentos), não master
+            return True
+
+        sub_url = urljoin(url, variant)
+        sub_text = _get_manifest_text(sub_url, timeout, headers)
+        return sub_text is not None and sub_text.lstrip().startswith("#EXTM3U")
+
+    # não é m3u8 — pode ser um .ts bruto direto, sem manifesto por cima. Aceita
+    # se o Content-Type confirma (video/mp2t é o valor padrão pra isso) OU se o
+    # próprio conteúdo já parece MPEG-TS de verdade.
+    if content_type and "mp2t" in content_type.lower():
         return True
-
-    sub_url = urljoin(url, variant)
-    sub_text = _get_manifest(sub_url, timeout, headers)
-    return sub_text is not None and sub_text.lstrip().startswith("#EXTM3U")
+    return _looks_like_raw_mpeg_ts(data)

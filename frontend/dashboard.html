@@ -106,12 +106,52 @@
   }
   button:hover { box-shadow: 0 0 16px rgba(0,217,255,.45); }
   button:disabled { opacity: .5; cursor: default; box-shadow: none; }
+  button.secondary { background: var(--card-hover); border: 1px solid var(--border); color: var(--muted); box-shadow: none; }
+  button.secondary:hover { color: var(--accent); border-color: var(--accent); }
+  select {
+    background: #081019; border: 1px solid var(--border); color: var(--text);
+    padding: 6px 8px; border-radius: 4px; font-size: 12px; font-family: "Rajdhani", inherit;
+  }
+  select:focus { outline: none; border-color: var(--accent); }
+  .bar-row.clickable-genre { cursor: pointer; }
+  .bar-row.clickable-genre:hover .bar-label { color: var(--accent); }
   .classify-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .classify-msg { font-size: 12px; color: var(--muted); }
   .progress-wrap { margin-top: 10px; }
   .progress-track { background: rgba(255,255,255,.06); border-radius: 4px; height: 8px; overflow: hidden; }
   .progress-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)); height: 100%; width: 0%; transition: width .2s; }
   .progress-text { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .stat-card.clickable { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  .stat-card.clickable:hover { border-color: var(--accent); box-shadow: 0 0 14px rgba(0,217,255,.15); }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,4,10,.7);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px; z-index: 100;
+  }
+  .modal-backdrop[hidden] { display: none; }
+  .modal-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    width: 100%; max-width: 720px; max-height: 85vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 0 40px rgba(0,217,255,.1);
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { margin: 0; font-size: 15px; color: var(--accent); }
+  .modal-close { background: none; box-shadow: none; color: var(--muted); font-size: 18px; padding: 2px 8px; }
+  .modal-close:hover { color: var(--danger); }
+  .modal-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid var(--border); }
+  .modal-tab {
+    background: none; box-shadow: none; color: var(--muted); border: none;
+    padding: 8px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em;
+    border-bottom: 2px solid transparent; border-radius: 0;
+  }
+  .modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .modal-body { padding: 14px 18px; overflow-y: auto; flex: 1; }
+  .stream-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .stream-row .s-name { color: var(--text); font-weight: 600; }
+  .stream-row .s-url { color: var(--muted); word-break: break-all; }
+  .stream-row .s-meta { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -128,6 +168,41 @@
 <main id="app">
   <div class="loading">Carregando...</div>
 </main>
+
+<div class="modal-backdrop" id="streams-modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Streams testados</h3>
+      <button class="modal-close" id="streams-modal-close">×</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" id="tab-healthy" data-tab="healthy">Saudáveis</button>
+      <button class="modal-tab" id="tab-unhealthy" data-tab="unhealthy">Não saudáveis</button>
+    </div>
+    <div class="modal-body" id="streams-modal-body">
+      <div class="loading">Carregando...</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="genre-assign-modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="genre-assign-title">Classificar manualmente</h3>
+      <button class="modal-close" id="genre-assign-modal-close">×</button>
+    </div>
+    <div class="modal-body" id="genre-assign-body">
+      <div class="loading">Carregando...</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 18px; border-top:1px solid var(--border);">
+      <span id="genre-assign-page-info" style="font-size:11px;color:var(--muted);"></span>
+      <div style="display:flex; gap:8px;">
+        <button class="secondary" id="genre-assign-prev">← Anterior</button>
+        <button class="secondary" id="genre-assign-next">Próxima →</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 async function apiFetch(path, options = {}) {
@@ -189,6 +264,28 @@ function renderDashboard(stats) {
     )
     .join("");
 
+  const genreBarsHtml = (rows, typeForClick) => {
+    const max = Math.max(1, ...rows.map((r) => r.count));
+    return rows
+      .slice(0, 15)
+      .map((r) => {
+        // a barra "sem gênero" é clicável — abre a tela de classificação manual
+        // pra esse tipo (filme ou série); as outras são só leitura
+        const isUnclassified = r.genre === "sem gênero";
+        const cls = isUnclassified ? "bar-row clickable-genre" : "bar-row";
+        const dataAttr = isUnclassified ? ` data-type="${typeForClick}"` : "";
+        return `
+        <div class="${cls}"${dataAttr} title="${isUnclassified ? "Clique para classificar manualmente" : ""}">
+          <div class="bar-label">${escapeHtml(r.genre)}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(r.count / max) * 100}%"></div></div>
+          <div class="bar-count">${r.count}</div>
+        </div>`;
+      })
+      .join("");
+  };
+  const moviesGenreBars = genreBarsHtml(stats.vod.movies_by_genre || [], "movie");
+  const seriesGenreBars = genreBarsHtml(stats.vod.series_by_genre || [], "series");
+
   const jobRows = Object.keys(JOB_LABELS)
     .map((jobName) => {
       const job = stats.worker_jobs.find((j) => j.job_name === jobName);
@@ -215,7 +312,7 @@ function renderDashboard(stats) {
         <div class="value">${stats.channels.total_active}</div>
         <div class="sub">${stats.channels.with_healthy_stream} funcionando agora (${channelPct}%)</div>
       </div>
-      <div class="stat-card ${streamPct >= 50 ? "ok" : "warn"}">
+      <div class="stat-card clickable ${streamPct >= 50 ? "ok" : "warn"}" id="streams-card" title="Clique para ver a lista">
         <div class="label">Streams saudáveis</div>
         <div class="value">${stats.streams.healthy}</div>
         <div class="sub">de ${stats.streams.total} mirrors testados (${streamPct}%)</div>
@@ -262,6 +359,20 @@ function renderDashboard(stats) {
     </section>
 
     <section class="panel">
+      <h2>Health-check manual</h2>
+      <div class="classify-row">
+        <button id="healthcheck-btn">Rodar health-check agora</button>
+        <span class="classify-msg" id="healthcheck-msg">
+          ${stats.streams.total ? "" : "Nenhum stream cadastrado ainda."}
+        </span>
+      </div>
+      <div class="progress-wrap" id="healthcheck-progress-wrap" hidden>
+        <div class="progress-track"><div class="progress-fill" id="healthcheck-progress-bar"></div></div>
+        <div class="progress-text" id="healthcheck-progress-text"></div>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2>Jobs do worker</h2>
       <table>
         <thead><tr><th>Job</th><th>Status</th><th>Última execução</th><th>Resumo</th></tr></thead>
@@ -271,7 +382,25 @@ function renderDashboard(stats) {
 
     <section class="panel">
       <h2>Canais por categoria</h2>
+      <div class="classify-row" style="margin-bottom: 14px;">
+        <button id="classify-channels-btn">Classificar canais sem categoria</button>
+        <span class="classify-msg" id="classify-channels-msg"></span>
+      </div>
+      <div class="progress-wrap" id="classify-channels-progress-wrap" hidden>
+        <div class="progress-track"><div class="progress-fill" id="classify-channels-progress-bar"></div></div>
+        <div class="progress-text" id="classify-channels-progress-text"></div>
+      </div>
       ${categoryBars || '<div class="loading">Sem dados.</div>'}
+    </section>
+
+    <section class="panel">
+      <h2>Filmes por gênero</h2>
+      ${moviesGenreBars || '<div class="loading">Sem dados.</div>'}
+    </section>
+
+    <section class="panel">
+      <h2>Séries por gênero</h2>
+      ${seriesGenreBars || '<div class="loading">Sem dados.</div>'}
     </section>
   `;
 
@@ -279,10 +408,30 @@ function renderDashboard(stats) {
   if (pendingClassifyMsg) {
     document.getElementById("classify-msg").textContent = pendingClassifyMsg;
   }
+
+  document.getElementById("healthcheck-btn").addEventListener("click", startHealthcheck);
+  if (pendingHealthcheckMsg) {
+    document.getElementById("healthcheck-msg").textContent = pendingHealthcheckMsg;
+  }
+
+  document.getElementById("classify-channels-btn").addEventListener("click", startClassifyChannels);
+  if (pendingClassifyChannelsMsg) {
+    document.getElementById("classify-channels-msg").textContent = pendingClassifyChannelsMsg;
+  }
+
+  document.getElementById("streams-card").addEventListener("click", openStreamsModal);
+
+  document.querySelectorAll(".clickable-genre").forEach((el) => {
+    el.addEventListener("click", () => openGenreAssignModal(el.dataset.type));
+  });
 }
 
 let classifyRunning = false;
 let pendingClassifyMsg = null;
+let healthcheckRunning = false;
+let pendingHealthcheckMsg = null;
+let classifyChannelsRunning = false;
+let pendingClassifyChannelsMsg = null;
 
 function showProgress(wrap, bar, text, processed, total, label) {
   wrap.hidden = false;
@@ -359,6 +508,308 @@ async function pollClassifyJob(jobId, msg, wrap, bar, text) {
   }
 }
 
+async function startHealthcheck() {
+  if (healthcheckRunning) return;
+  healthcheckRunning = true;
+
+  const btn = document.getElementById("healthcheck-btn");
+  const msg = document.getElementById("healthcheck-msg");
+  const wrap = document.getElementById("healthcheck-progress-wrap");
+  const bar = document.getElementById("healthcheck-progress-bar");
+  const text = document.getElementById("healthcheck-progress-text");
+
+  btn.disabled = true;
+  msg.textContent = "Iniciando...";
+  showProgress(wrap, bar, text, 0, 1, "Testando streams");
+
+  try {
+    const resp = await apiFetch("admin/healthcheck", { method: "POST" });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      wrap.hidden = true;
+      msg.textContent = body.detail || "Falha ao iniciar.";
+      return;
+    }
+    const body = await resp.json();
+    await pollHealthcheckJob(body.job_id, msg, wrap, bar, text);
+  } catch {
+    wrap.hidden = true;
+    msg.textContent = "Falha de rede.";
+  } finally {
+    btn.disabled = false;
+    healthcheckRunning = false;
+  }
+}
+
+async function pollHealthcheckJob(jobId, msg, wrap, bar, text) {
+  while (true) {
+    let job;
+    try {
+      const resp = await apiFetch(`admin/healthcheck/${jobId}/status`);
+      job = await resp.json();
+    } catch {
+      wrap.hidden = true;
+      msg.textContent = "Falha de rede ao consultar o progresso.";
+      return;
+    }
+
+    showProgress(wrap, bar, text, job.processed, job.total, "Testando streams");
+
+    if (job.status === "done") {
+      wrap.hidden = true;
+      // mesmo motivo do classify-genres: load() recria o painel do zero, então
+      // guarda a mensagem numa variável pra renderDashboard() reaplicar depois.
+      pendingHealthcheckMsg = `${job.healthy} de ${job.total} stream(s) respondendo agora.`;
+      msg.textContent = pendingHealthcheckMsg;
+      load();
+      return;
+    }
+    if (job.status === "error") {
+      wrap.hidden = true;
+      pendingHealthcheckMsg = "Erro: " + (job.error || "desconhecido");
+      msg.textContent = pendingHealthcheckMsg;
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
+}
+
+async function startClassifyChannels() {
+  if (classifyChannelsRunning) return;
+  classifyChannelsRunning = true;
+
+  const btn = document.getElementById("classify-channels-btn");
+  const msg = document.getElementById("classify-channels-msg");
+  const wrap = document.getElementById("classify-channels-progress-wrap");
+  const bar = document.getElementById("classify-channels-progress-bar");
+  const text = document.getElementById("classify-channels-progress-text");
+
+  btn.disabled = true;
+  msg.textContent = "Iniciando...";
+  showProgress(wrap, bar, text, 0, 1, "Classificando canais");
+
+  try {
+    const resp = await apiFetch("admin/channels/classify-categories", { method: "POST" });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      wrap.hidden = true;
+      msg.textContent = body.detail || "Falha ao iniciar.";
+      return;
+    }
+    const body = await resp.json();
+    await pollClassifyChannelsJob(body.job_id, msg, wrap, bar, text);
+  } catch {
+    wrap.hidden = true;
+    msg.textContent = "Falha de rede.";
+  } finally {
+    btn.disabled = false;
+    classifyChannelsRunning = false;
+  }
+}
+
+async function pollClassifyChannelsJob(jobId, msg, wrap, bar, text) {
+  while (true) {
+    let job;
+    try {
+      const resp = await apiFetch(`admin/channels/classify-categories/${jobId}/status`);
+      job = await resp.json();
+    } catch {
+      wrap.hidden = true;
+      msg.textContent = "Falha de rede ao consultar o progresso.";
+      return;
+    }
+
+    showProgress(wrap, bar, text, job.processed, job.total, "Classificando canais");
+
+    if (job.status === "done") {
+      wrap.hidden = true;
+      pendingClassifyChannelsMsg = `${job.classified} de ${job.total} canal(is) sem categoria foram classificados.`;
+      msg.textContent = pendingClassifyChannelsMsg;
+      load();
+      return;
+    }
+    if (job.status === "error") {
+      wrap.hidden = true;
+      pendingClassifyChannelsMsg = "Erro: " + (job.error || "desconhecido");
+      msg.textContent = pendingClassifyChannelsMsg;
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
+}
+
+let currentStreamsTab = "healthy";
+
+function openStreamsModal() {
+  document.getElementById("streams-modal").hidden = false;
+  loadStreamsTab(currentStreamsTab);
+}
+
+function closeStreamsModal() {
+  document.getElementById("streams-modal").hidden = true;
+}
+
+document.getElementById("streams-modal-close").addEventListener("click", closeStreamsModal);
+document.getElementById("streams-modal").addEventListener("click", (e) => {
+  if (e.target.id === "streams-modal") closeStreamsModal();
+});
+document.querySelectorAll(".modal-tab").forEach((tabBtn) => {
+  tabBtn.addEventListener("click", () => {
+    currentStreamsTab = tabBtn.dataset.tab;
+    document.querySelectorAll(".modal-tab").forEach((b) => b.classList.remove("active"));
+    tabBtn.classList.add("active");
+    loadStreamsTab(currentStreamsTab);
+  });
+});
+
+async function loadStreamsTab(tab) {
+  const body = document.getElementById("streams-modal-body");
+  body.innerHTML = `<div class="loading">Carregando...</div>`;
+  try {
+    const healthy = tab === "healthy";
+    const resp = await apiFetch(`admin/streams?healthy=${healthy}`);
+    const data = await resp.json();
+    if (!data.streams.length) {
+      body.innerHTML = `<div class="loading">Nenhum stream ${healthy ? "saudável" : "não saudável"} no momento.</div>`;
+      return;
+    }
+    body.innerHTML = data.streams
+      .map(
+        (s) => `
+        <div class="stream-row">
+          <div class="s-name">${escapeHtml(s.channel_name || "(canal desconhecido)")}</div>
+          <div class="s-url">${escapeHtml(s.url)}</div>
+          <div class="s-meta">${
+            s.checked_age_seconds != null ? "checado " + fmtAge(s.checked_age_seconds) : "nunca checado"
+          }${s.consecutive_failures ? ` · ${s.consecutive_failures} falha(s) consecutiva(s)` : ""}</div>
+        </div>`
+      )
+      .join("");
+  } catch {
+    body.innerHTML = `<div class="error-msg">Falha ao carregar.</div>`;
+  }
+}
+
+let genreAssignType = null;
+let genreAssignOffset = 0;
+const GENRE_ASSIGN_PAGE_SIZE = 20;
+let genreOptionsCache = null;
+
+async function getGenreOptions() {
+  if (genreOptionsCache) return genreOptionsCache;
+  try {
+    const resp = await apiFetch("admin/genre-keywords");
+    const data = await resp.json();
+    genreOptionsCache = (data.genres || []).map((g) => g.genre);
+  } catch {
+    genreOptionsCache = [];
+  }
+  return genreOptionsCache;
+}
+
+function openGenreAssignModal(type) {
+  genreAssignType = type;
+  genreAssignOffset = 0;
+  document.getElementById("genre-assign-title").textContent =
+    type === "movie" ? "Classificar filmes sem gênero" : "Classificar séries sem gênero";
+  document.getElementById("genre-assign-modal").hidden = false;
+  loadGenreAssignPage();
+}
+
+function closeGenreAssignModal() {
+  document.getElementById("genre-assign-modal").hidden = true;
+}
+
+async function loadGenreAssignPage() {
+  const body = document.getElementById("genre-assign-body");
+  const pageInfo = document.getElementById("genre-assign-page-info");
+  body.innerHTML = `<div class="loading">Carregando...</div>`;
+  try {
+    const [genres, resp] = await Promise.all([
+      getGenreOptions(),
+      apiFetch(`admin/vod/titles-without-genre?type=${genreAssignType}&limit=${GENRE_ASSIGN_PAGE_SIZE}&offset=${genreAssignOffset}`),
+    ]);
+    const data = await resp.json();
+
+    if (!data.titles.length) {
+      body.innerHTML = `<div class="loading">${
+        data.total === 0 ? "Nenhum título sem gênero — tudo classificado por aqui." : "Fim da lista."
+      }</div>`;
+      pageInfo.textContent = `${data.total} no total`;
+      return;
+    }
+
+    body.innerHTML = data.titles
+      .map(
+        (t) => `
+        <div class="stream-row" data-title-id="${t.id}">
+          <div class="s-name">${escapeHtml(t.title)}${t.year ? ` (${t.year})` : ""}</div>
+          <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+            <select class="genre-select">
+              <option value="">Selecione o gênero...</option>
+              ${genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("")}
+            </select>
+            <button class="secondary genre-save-btn">Salvar</button>
+            <span class="genre-save-status s-meta"></span>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    pageInfo.textContent = `${genreAssignOffset + 1}–${genreAssignOffset + data.titles.length} de ${data.total}`;
+
+    body.querySelectorAll(".genre-save-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest(".stream-row");
+        const titleId = row.dataset.titleId;
+        const select = row.querySelector(".genre-select");
+        const status = row.querySelector(".genre-save-status");
+        if (!select.value) {
+          status.textContent = "Escolha um gênero primeiro.";
+          return;
+        }
+        btn.disabled = true;
+        status.textContent = "Salvando...";
+        try {
+          const patchResp = await apiFetch(`admin/vod/titles/${titleId}/genre`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ genre: select.value }),
+          });
+          if (!patchResp.ok) {
+            status.textContent = "Falha ao salvar.";
+            btn.disabled = false;
+            return;
+          }
+          row.style.opacity = "0.4";
+          status.textContent = "Salvo ✓";
+          select.disabled = true;
+        } catch {
+          status.textContent = "Falha de rede.";
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch {
+    body.innerHTML = `<div class="error-msg">Falha ao carregar.</div>`;
+  }
+}
+
+document.getElementById("genre-assign-modal-close").addEventListener("click", closeGenreAssignModal);
+document.getElementById("genre-assign-modal").addEventListener("click", (e) => {
+  if (e.target.id === "genre-assign-modal") closeGenreAssignModal();
+});
+document.getElementById("genre-assign-prev").addEventListener("click", () => {
+  genreAssignOffset = Math.max(0, genreAssignOffset - GENRE_ASSIGN_PAGE_SIZE);
+  loadGenreAssignPage();
+});
+document.getElementById("genre-assign-next").addEventListener("click", () => {
+  genreAssignOffset += GENRE_ASSIGN_PAGE_SIZE;
+  loadGenreAssignPage();
+});
+
 async function load() {
   const app = document.getElementById("app");
   try {
@@ -379,9 +830,10 @@ async function load() {
 
 load();
 setInterval(() => {
-  // não re-renderiza enquanto a classificação de gêneros está em andamento —
-  // evitaria substituir a barra de progresso no meio do processo
-  if (!classifyRunning) load();
+  // não re-renderiza enquanto a classificação de gêneros/canais ou o
+  // health-check manual estão em andamento — evitaria substituir a barra de
+  // progresso no meio do processo
+  if (!classifyRunning && !healthcheckRunning && !classifyChannelsRunning) load();
 }, 30000);
 </script>
 </body>
