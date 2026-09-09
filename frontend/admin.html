@@ -4,66 +4,108 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Admin — DevolpsTV</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #0f1115;
-    --card: #1a1d24;
-    --text: #e8e8ea;
-    --muted: #8a8f98;
-    --accent: #4f8cff;
-    --border: #2a2e37;
-    --danger: #e5534b;
-    --ok: #35c46b;
+    color-scheme: dark;
+    --bg: #030509;
+    --card: #0a1420;
+    --card-hover: #0e1c2e;
+    --text: #d7e6f5;
+    --muted: #5b7a94;
+    --accent: #00d9ff;
+    --accent-dim: #0a3a4d;
+    --accent2: #2f6fff;
+    --border: #123049;
+    --ok: #2be07a;
+    --warn: #ffb020;
+    --danger: #ff3d6e;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
+      radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1, h2, button { font-family: "Chakra Petch", "Rajdhani", sans-serif; }
   header {
-    padding: 14px 20px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,217,255,0.05), transparent);
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
   }
-  header h1 { font-size: 15px; margin: 0; color: var(--muted); font-weight: 600; flex: 1; }
-  main { padding: 20px; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,217,255,.5);
+  }
+  header nav { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  header nav a { color: var(--muted); font-size: 13px; text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { padding: 24px; max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
   section {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 6px;
     padding: 18px;
   }
-  section h2 { font-size: 13px; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  section h2 { font-size: 13px; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
   .row > div { flex: 1; min-width: 140px; }
   label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   input, textarea, select {
     width: 100%;
-    background: #10131a;
+    background: #081019;
     border: 1px solid var(--border);
     color: var(--text);
     padding: 7px 9px;
-    border-radius: 6px;
+    border-radius: 4px;
     font-size: 13px;
-    font-family: inherit;
+    font-family: "Rajdhani", inherit;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(0,217,255,.3);
   }
   textarea { resize: vertical; min-height: 50px; }
+  input[type="checkbox"] { width: auto; }
+  .checkbox-row { display: flex; align-items: center; gap: 6px; margin-top: 22px; }
+  .checkbox-row label { margin: 0; color: var(--text); font-size: 13px; }
   button {
-    background: var(--accent);
-    color: white;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    color: #041018;
     border: none;
     padding: 8px 14px;
-    border-radius: 6px;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(0,217,255,.25);
   }
-  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+  button:hover { box-shadow: 0 0 16px rgba(0,217,255,.45); }
+  button:disabled { opacity: .5; cursor: default; box-shadow: none; }
+  button.secondary { background: var(--card-hover); border: 1px solid var(--border); color: var(--muted); box-shadow: none; }
+  button.secondary:hover { color: var(--accent); border-color: var(--accent); }
+  button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); box-shadow: none; }
   .msg { font-size: 12px; margin-top: 8px; min-height: 14px; }
   .msg.ok { color: var(--ok); }
   .msg.error { color: var(--danger); }
 
-  .title-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .title-card { border: 1px solid var(--border); border-radius: 4px; padding: 12px; margin-bottom: 10px; }
   .title-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .title-card-head strong { font-size: 13px; }
   .title-card-head .meta { color: var(--muted); font-size: 11px; }
@@ -74,12 +116,20 @@
   .add-episode-row input { width: 60px; flex: 0 0 auto; }
   .add-episode-row input.episode-title { flex: 1; width: auto; }
   .add-episode-row input.episode-url { flex: 2; width: auto; }
+  .progress-wrap { margin-top: 8px; }
+  .progress-track { background: rgba(255,255,255,.06); border-radius: 4px; height: 8px; overflow: hidden; }
+  .progress-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)); height: 100%; width: 0%; transition: width .2s; }
+  .progress-text { font-size: 11px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>DevolpsTV — cadastro de filmes e séries</h1>
-  <a href="dashboard.html" style="color: var(--muted); font-size: 13px;">Dashboard</a>
+  <h1>DevolpsTV — Cadastro</h1>
+  <nav>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="genres.html">Gêneros</a>
+    <a href="index.html">Player</a>
+  </nav>
   <button class="secondary" id="logout-btn">Sair</button>
 </header>
 
@@ -133,6 +183,26 @@
   </section>
 
   <section>
+    <h2>Adicionar canal de TV ao vivo</h2>
+    <p style="color: var(--muted); font-size: 12px; margin-top: 0;">
+      Complementa o que o worker traz automaticamente. Se o ID já existir, o link entra como mais um
+      mirror do canal (não duplica).
+    </p>
+    <div class="row">
+      <div><label>ID do canal (tvg-id) *</label><input id="c-tvgid" placeholder="ex: MeuCanal.br" /></div>
+      <div><label>Nome *</label><input id="c-name" /></div>
+      <div><label>Categoria (opcional)</label><input id="c-category" placeholder="ex: news, sports, movies" /></div>
+    </div>
+    <div class="row">
+      <div><label>Logo — URL (opcional)</label><input id="c-logo" /></div>
+      <div><label>Link do stream (.m3u8) *</label><input id="c-url" /></div>
+      <div class="checkbox-row"><input type="checkbox" id="c-broadcast" /><label for="c-broadcast">É TV aberta</label></div>
+    </div>
+    <button id="c-add-btn">Adicionar canal</button>
+    <div class="msg" id="c-msg"></div>
+  </section>
+
+  <section>
     <h2>Importar CSV (vários títulos de uma vez)</h2>
     <p style="color: var(--muted); font-size: 12px; margin-top: 0;">
       Mesmo formato do <code>data/titulos.exemplo.csv</code> do repositório. Idempotente —
@@ -144,11 +214,9 @@
       <div style="flex: 0 0 auto;"><button id="csv-upload-btn">Importar</button></div>
     </div>
     <div class="msg" id="csv-msg"></div>
-    <div id="csv-progress-wrap" hidden style="margin-top:8px;">
-      <div style="background: var(--border); border-radius: 6px; height: 8px; overflow: hidden;">
-        <div id="csv-progress-bar" style="background: var(--accent); height: 100%; width: 0%; transition: width .2s;"></div>
-      </div>
-      <div id="csv-progress-text" style="font-size: 11px; color: var(--muted); margin-top: 4px;"></div>
+    <div class="progress-wrap" id="csv-progress-wrap" hidden>
+      <div class="progress-track"><div class="progress-fill" id="csv-progress-bar"></div></div>
+      <div class="progress-text" id="csv-progress-text"></div>
     </div>
   </section>
 
@@ -197,19 +265,24 @@ async function apiFetch(path, options = {}) {
   return resp;
 }
 
-const GENRES = [
-  "Ação", "Animação", "Aventura", "Biografia", "Comédia", "Crime",
-  "Documentário", "Drama", "Esporte", "Família", "Fantasia", "Guerra",
-  "História", "Infantil", "Musical", "Mistério", "Romance",
-  "Ficção Científica", "Suspense", "Terror",
-];
+// gêneros vêm da tabela editável (genre_keywords) em vez de uma lista fixa no
+// código — assim ficam consistentes com o que o classificador automático usa
+const FALLBACK_GENRES = ["Ação", "Animação", "Aventura", "Biografia", "Comédia", "Crime", "Documentário", "Drama"];
 
-function setupGenreSelect(selectId, outroInputId) {
+async function setupGenreSelect(selectId, outroInputId) {
   const select = document.getElementById(selectId);
   const outroInput = document.getElementById(outroInputId);
+
+  let genres = FALLBACK_GENRES;
+  try {
+    const resp = await apiFetch("admin/genre-keywords");
+    const data = await resp.json();
+    if (data.genres?.length) genres = data.genres.map((g) => g.genre);
+  } catch {}
+
   select.innerHTML =
     `<option value="">Selecione (opcional)</option>` +
-    GENRES.map((g) => `<option value="${g}">${g}</option>`).join("") +
+    genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("") +
     `<option value="__outro__">Outro...</option>`;
   select.addEventListener("change", () => {
     outroInput.hidden = select.value !== "__outro__";
@@ -293,20 +366,51 @@ document.getElementById("s-add-btn").addEventListener("click", async () => {
   } catch {}
 });
 
+document.getElementById("c-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("c-msg");
+  const tvgId = document.getElementById("c-tvgid").value.trim();
+  const name = document.getElementById("c-name").value.trim();
+  const url = document.getElementById("c-url").value.trim();
+  if (!tvgId || !name || !url) return setMsg(msg, "ID, nome e link são obrigatórios.", true);
+
+  try {
+    const resp = await apiFetch("admin/channels", {
+      method: "POST",
+      body: JSON.stringify({
+        tvg_id: tvgId,
+        name,
+        category: document.getElementById("c-category").value.trim() || null,
+        logo_url: document.getElementById("c-logo").value.trim() || null,
+        is_broadcast_tv: document.getElementById("c-broadcast").checked,
+        stream_url: url,
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      return setMsg(msg, body.detail || "Falha ao adicionar.", true);
+    }
+    const body = await resp.json();
+    const msgText = body.new_channel
+      ? `Canal "${name}" criado com esse link.`
+      : body.stream_added
+      ? `Link adicionado como novo mirror de "${name}".`
+      : `Esse link já existia nesse canal — nada mudou.`;
+    setMsg(msg, msgText, false);
+    ["c-tvgid", "c-name", "c-category", "c-logo", "c-url"].forEach((id) => (document.getElementById(id).value = ""));
+    document.getElementById("c-broadcast").checked = false;
+  } catch {}
+});
+
 const csvProgressWrap = document.getElementById("csv-progress-wrap");
 const csvProgressBar = document.getElementById("csv-progress-bar");
 const csvProgressText = document.getElementById("csv-progress-text");
 const csvUploadBtn = document.getElementById("csv-upload-btn");
 
-function showCsvProgress(processed, total) {
-  csvProgressWrap.hidden = false;
+function showProgress(wrap, bar, text, processed, total, label) {
+  wrap.hidden = false;
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
-  csvProgressBar.style.width = pct + "%";
-  csvProgressText.textContent = `Processando: ${processed}/${total} linha(s) (${pct}%)`;
-}
-
-function hideCsvProgress() {
-  csvProgressWrap.hidden = true;
+  bar.style.width = pct + "%";
+  text.textContent = `${label}: ${processed}/${total} (${pct}%)`;
 }
 
 document.getElementById("csv-upload-btn").addEventListener("click", async () => {
@@ -320,23 +424,17 @@ document.getElementById("csv-upload-btn").addEventListener("click", async () => 
 
   csvUploadBtn.disabled = true;
   setMsg(msg, "Enviando arquivo...", false);
-  showCsvProgress(0, 1);
+  showProgress(csvProgressWrap, csvProgressBar, csvProgressText, 0, 1, "Processando");
 
   try {
-    // upload de arquivo usa multipart/form-data — o navegador define o
-    // Content-Type (com boundary) sozinho, por isso não passamos headers aqui
-    const resp = await fetch("admin/vod/import-csv", {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
+    const resp = await fetch("admin/vod/import-csv", { method: "POST", credentials: "include", body: formData });
     if (resp.status === 401) {
       window.location.href = "login.html";
       return;
     }
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      hideCsvProgress();
+      csvProgressWrap.hidden = true;
       csvUploadBtn.disabled = false;
       return setMsg(msg, body.detail || "Falha ao importar.", true);
     }
@@ -346,7 +444,7 @@ document.getElementById("csv-upload-btn").addEventListener("click", async () => 
     fileInput.value = "";
     loadCatalog();
   } catch {
-    hideCsvProgress();
+    csvProgressWrap.hidden = true;
     setMsg(msg, "Falha de rede ao importar.", true);
   } finally {
     csvUploadBtn.disabled = false;
@@ -360,15 +458,15 @@ async function pollImportJob(jobId, msg) {
       const resp = await apiFetch(`admin/vod/import-csv/${jobId}/status`);
       job = await resp.json();
     } catch {
-      hideCsvProgress();
+      csvProgressWrap.hidden = true;
       setMsg(msg, "Falha de rede ao consultar o progresso.", true);
       return;
     }
 
-    showCsvProgress(job.processed, job.total);
+    showProgress(csvProgressWrap, csvProgressBar, csvProgressText, job.processed, job.total, "Processando");
 
     if (job.status === "done") {
-      hideCsvProgress();
+      csvProgressWrap.hidden = true;
       const s = job.stats || {};
       const ignoradas = s.linhas_ignoradas?.length ? `, ${s.linhas_ignoradas.length} linha(s) ignorada(s)` : "";
       setMsg(
@@ -379,7 +477,7 @@ async function pollImportJob(jobId, msg) {
       return;
     }
     if (job.status === "error") {
-      hideCsvProgress();
+      csvProgressWrap.hidden = true;
       setMsg(msg, "Erro ao importar: " + (job.error || "desconhecido"), true);
       return;
     }

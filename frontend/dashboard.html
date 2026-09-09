@@ -91,6 +91,27 @@
   .job-dot.stale { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
   .loading, .error-msg { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
   .error-msg { color: var(--danger); }
+  button {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    color: #041018;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(0,217,255,.25);
+  }
+  button:hover { box-shadow: 0 0 16px rgba(0,217,255,.45); }
+  button:disabled { opacity: .5; cursor: default; box-shadow: none; }
+  .classify-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .classify-msg { font-size: 12px; color: var(--muted); }
+  .progress-wrap { margin-top: 10px; }
+  .progress-track { background: rgba(255,255,255,.06); border-radius: 4px; height: 8px; overflow: hidden; }
+  .progress-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)); height: 100%; width: 0%; transition: width .2s; }
+  .progress-text { font-size: 11px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -98,6 +119,7 @@
   <h1>📡 DevolpsTV — Dashboard</h1>
   <nav>
     <a href="admin.html">Cadastro</a>
+    <a href="genres.html">Gêneros</a>
     <a href="index.html">Player</a>
   </nav>
   <span id="refresh-info"></span>
@@ -108,8 +130,8 @@
 </main>
 
 <script>
-async function apiFetch(path) {
-  const resp = await fetch(path, { credentials: "include" });
+async function apiFetch(path, options = {}) {
+  const resp = await fetch(path, { credentials: "include", ...options });
   if (resp.status === 401) {
     window.location.href = "login.html";
     throw new Error("não autenticado");
@@ -226,6 +248,20 @@ function renderDashboard(stats) {
     </div>
 
     <section class="panel">
+      <h2>Classificação automática de gênero</h2>
+      <div class="classify-row">
+        <button id="classify-btn">Classificar gêneros</button>
+        <span class="classify-msg" id="classify-msg">
+          ${stats.vod.total_titles ? "" : "Sem títulos no catálogo ainda."}
+        </span>
+      </div>
+      <div class="progress-wrap" id="classify-progress-wrap" hidden>
+        <div class="progress-track"><div class="progress-fill" id="classify-progress-bar"></div></div>
+        <div class="progress-text" id="classify-progress-text"></div>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2>Jobs do worker</h2>
       <table>
         <thead><tr><th>Job</th><th>Status</th><th>Última execução</th><th>Resumo</th></tr></thead>
@@ -238,6 +274,89 @@ function renderDashboard(stats) {
       ${categoryBars || '<div class="loading">Sem dados.</div>'}
     </section>
   `;
+
+  document.getElementById("classify-btn").addEventListener("click", startClassify);
+  if (pendingClassifyMsg) {
+    document.getElementById("classify-msg").textContent = pendingClassifyMsg;
+  }
+}
+
+let classifyRunning = false;
+let pendingClassifyMsg = null;
+
+function showProgress(wrap, bar, text, processed, total, label) {
+  wrap.hidden = false;
+  const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+  bar.style.width = pct + "%";
+  text.textContent = `${label}: ${processed}/${total} (${pct}%)`;
+}
+
+async function startClassify() {
+  if (classifyRunning) return;
+  classifyRunning = true;
+
+  const btn = document.getElementById("classify-btn");
+  const msg = document.getElementById("classify-msg");
+  const wrap = document.getElementById("classify-progress-wrap");
+  const bar = document.getElementById("classify-progress-bar");
+  const text = document.getElementById("classify-progress-text");
+
+  btn.disabled = true;
+  msg.textContent = "Iniciando...";
+  showProgress(wrap, bar, text, 0, 1, "Classificando");
+
+  try {
+    const resp = await apiFetch("admin/vod/classify-genres", { method: "POST" });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      wrap.hidden = true;
+      msg.textContent = body.detail || "Falha ao iniciar.";
+      return;
+    }
+    const body = await resp.json();
+    await pollClassifyJob(body.job_id, msg, wrap, bar, text);
+  } catch {
+    wrap.hidden = true;
+    msg.textContent = "Falha de rede.";
+  } finally {
+    btn.disabled = false;
+    classifyRunning = false;
+  }
+}
+
+async function pollClassifyJob(jobId, msg, wrap, bar, text) {
+  while (true) {
+    let job;
+    try {
+      const resp = await apiFetch(`admin/vod/classify-genres/${jobId}/status`);
+      job = await resp.json();
+    } catch {
+      wrap.hidden = true;
+      msg.textContent = "Falha de rede ao consultar o progresso.";
+      return;
+    }
+
+    showProgress(wrap, bar, text, job.processed, job.total, "Classificando");
+
+    if (job.status === "done") {
+      wrap.hidden = true;
+      // load() recria o painel do zero (novo <span id="classify-msg">), então o
+      // texto seria perdido na hora — guarda numa variável e renderDashboard()
+      // reaplica ela no elemento novo depois de renderizar.
+      pendingClassifyMsg = `${job.classified} de ${job.total} título(s) sem gênero foram classificados.`;
+      msg.textContent = pendingClassifyMsg;
+      load();
+      return;
+    }
+    if (job.status === "error") {
+      wrap.hidden = true;
+      pendingClassifyMsg = "Erro: " + (job.error || "desconhecido");
+      msg.textContent = pendingClassifyMsg;
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
 }
 
 async function load() {
@@ -259,7 +378,11 @@ async function load() {
 }
 
 load();
-setInterval(load, 30000); // auto-refresh a cada 30s
+setInterval(() => {
+  // não re-renderiza enquanto a classificação de gêneros está em andamento —
+  // evitaria substituir a barra de progresso no meio do processo
+  if (!classifyRunning) load();
+}, 30000);
 </script>
 </body>
 </html>

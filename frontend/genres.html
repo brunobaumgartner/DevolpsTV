@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gêneros — DevolpsTV</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #030509;
+    --card: #0a1420;
+    --card-hover: #0e1c2e;
+    --text: #d7e6f5;
+    --muted: #5b7a94;
+    --accent: #00d9ff;
+    --accent-dim: #0a3a4d;
+    --accent2: #2f6fff;
+    --border: #123049;
+    --ok: #2be07a;
+    --warn: #ffb020;
+    --danger: #ff3d6e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
+      radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Rajdhani", system-ui, sans-serif;
+  }
+  h1, h2, button { font-family: "Chakra Petch", "Rajdhani", sans-serif; }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,217,255,0.05), transparent);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,217,255,.5);
+  }
+  header nav { margin-left: auto; display: flex; gap: 16px; }
+  header nav a { color: var(--muted); font-size: 13px; text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { padding: 24px; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px;
+  }
+  section h2 { font-size: 13px; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  input, select {
+    background: #081019;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: "Rajdhani", inherit;
+  }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(0,217,255,.3); }
+  button {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    color: #041018;
+    border: none;
+    padding: 7px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(0,217,255,.25);
+  }
+  button:hover { box-shadow: 0 0 16px rgba(0,217,255,.45); }
+  button.secondary { background: var(--card-hover); border: 1px solid var(--border); color: var(--muted); box-shadow: none; }
+  button.secondary:hover { color: var(--accent); border-color: var(--accent); }
+  button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); box-shadow: none; padding: 6px 10px; }
+  button.danger:hover { background: rgba(255,61,110,.1); }
+
+  .genre-card { border: 1px solid var(--border); border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+  .genre-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .genre-card-head h3 { margin: 0; font-size: 15px; color: var(--accent); flex: 1; }
+  .genre-card-head .count { font-size: 11px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--card-hover); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 6px 4px 10px; font-size: 12px;
+  }
+  .chip button {
+    background: none; box-shadow: none; border: none; color: var(--muted);
+    padding: 0 4px; font-size: 13px; line-height: 1;
+  }
+  .chip button:hover { color: var(--danger); }
+  .add-kw-row { display: flex; gap: 6px; }
+  .add-kw-row input { flex: 1; }
+  .empty { color: var(--muted); font-size: 12px; font-style: italic; }
+  .msg { font-size: 12px; margin-top: 8px; min-height: 14px; }
+  .msg.ok { color: var(--ok); }
+  .msg.error { color: var(--danger); }
+  .new-genre-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .new-genre-row input { flex: 1; min-width: 140px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DevolpsTV — Gêneros</h1>
+  <nav>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="admin.html">Cadastro</a>
+    <a href="index.html">Player</a>
+  </nav>
+</header>
+
+<main>
+  <section>
+    <h2>Novo gênero</h2>
+    <p style="color: var(--muted); font-size: 12px; margin-top: 0;">
+      Cria um gênero com sua primeira palavra-chave. Depois de criado, adicione mais palavras no card dele abaixo.
+    </p>
+    <div class="new-genre-row">
+      <input id="ng-genre" placeholder="Nome do gênero (ex: Suspense)" />
+      <input id="ng-keyword" placeholder="Primeira palavra-chave" />
+      <button id="ng-add-btn">Criar gênero</button>
+    </div>
+    <div class="msg" id="ng-msg"></div>
+  </section>
+
+  <section>
+    <h2>Gêneros e palavras-chave</h2>
+    <div id="genres-list"><div class="empty">Carregando...</div></div>
+  </section>
+</main>
+
+<script>
+async function apiFetch(path, options = {}) {
+  const resp = await fetch(path, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (resp.status === 401) {
+    window.location.href = "login.html";
+    throw new Error("não autenticado");
+  }
+  return resp;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
+function setMsg(el, text, isError) {
+  el.textContent = text;
+  el.className = "msg " + (isError ? "error" : "ok");
+}
+
+async function loadGenres() {
+  const listEl = document.getElementById("genres-list");
+  try {
+    const resp = await apiFetch("admin/genre-keywords");
+    const data = await resp.json();
+    if (!data.genres?.length) {
+      listEl.innerHTML = `<div class="empty">Nenhum gênero cadastrado ainda.</div>`;
+      return;
+    }
+    listEl.innerHTML = "";
+    data.genres.forEach((g) => listEl.appendChild(renderGenreCard(g)));
+  } catch {
+    listEl.innerHTML = `<div class="empty">Falha ao carregar.</div>`;
+  }
+}
+
+function renderGenreCard(genreData) {
+  const card = document.createElement("div");
+  card.className = "genre-card";
+
+  const head = document.createElement("div");
+  head.className = "genre-card-head";
+  head.innerHTML = `<h3>${escapeHtml(genreData.genre)}</h3><span class="count">${genreData.keywords.length} palavra(s)</span>`;
+
+  const delGenreBtn = document.createElement("button");
+  delGenreBtn.className = "danger";
+  delGenreBtn.textContent = "Excluir gênero";
+  delGenreBtn.addEventListener("click", async () => {
+    if (!confirm(`Excluir o gênero "${genreData.genre}" e todas as suas palavras-chave? Isso não afeta títulos já classificados.`)) return;
+    await apiFetch(`admin/genre-keywords/genre/${encodeURIComponent(genreData.genre)}`, { method: "DELETE" });
+    loadGenres();
+  });
+  head.appendChild(delGenreBtn);
+  card.appendChild(head);
+
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  if (!genreData.keywords.length) {
+    chips.innerHTML = `<span class="empty">Sem palavras-chave.</span>`;
+  } else {
+    genreData.keywords.forEach((kw) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.innerHTML = `${escapeHtml(kw.keyword)} <button title="Remover">×</button>`;
+      chip.querySelector("button").addEventListener("click", async () => {
+        await apiFetch(`admin/genre-keywords/${kw.id}`, { method: "DELETE" });
+        loadGenres();
+      });
+      chips.appendChild(chip);
+    });
+  }
+  card.appendChild(chips);
+
+  const addRow = document.createElement("div");
+  addRow.className = "add-kw-row";
+  addRow.innerHTML = `<input placeholder="Nova palavra-chave" /><button class="secondary">+ Adicionar</button>`;
+  const input = addRow.querySelector("input");
+  const addBtn = addRow.querySelector("button");
+  const submit = async () => {
+    const keyword = input.value.trim();
+    if (!keyword) return;
+    await apiFetch("admin/genre-keywords", {
+      method: "POST",
+      body: JSON.stringify({ genre: genreData.genre, keyword }),
+    });
+    input.value = "";
+    loadGenres();
+  };
+  addBtn.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+  card.appendChild(addRow);
+
+  return card;
+}
+
+document.getElementById("ng-add-btn").addEventListener("click", async () => {
+  const msg = document.getElementById("ng-msg");
+  const genre = document.getElementById("ng-genre").value.trim();
+  const keyword = document.getElementById("ng-keyword").value.trim();
+  if (!genre || !keyword) return setMsg(msg, "Preencha o nome do gênero e a primeira palavra-chave.", true);
+
+  try {
+    const resp = await apiFetch("admin/genre-keywords", {
+      method: "POST",
+      body: JSON.stringify({ genre, keyword }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      return setMsg(msg, body.detail || "Falha ao criar.", true);
+    }
+    setMsg(msg, `Gênero "${genre}" criado.`, false);
+    document.getElementById("ng-genre").value = "";
+    document.getElementById("ng-keyword").value = "";
+    loadGenres();
+  } catch {}
+});
+
+loadGenres();
+</script>
+</body>
+</html>

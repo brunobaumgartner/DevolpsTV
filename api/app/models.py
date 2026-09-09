@@ -139,6 +139,20 @@ class WorkerRun(Base):
     duration_seconds = Column(Integer)
 
 
+class GenreKeyword(Base):
+    """Palavra/expressão (EN ou PT) que indica um gênero, usada pra classificar
+    títulos VOD sem gênero automaticamente por palavra-chave no título. Editável
+    via /genres.html. A ordem de prioridade na classificação é pelo `id` mais
+    antigo de cada gênero (gênero "descoberto" primeiro = checado primeiro)."""
+
+    __tablename__ = "genre_keywords"
+
+    id = Column(Integer, primary_key=True)
+    genre = Column(String(100), nullable=False, index=True)
+    keyword = Column(String(200), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class AccessToken(Base):
     __tablename__ = "access_tokens"
 

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .auth_admin import hash_password
 from .config import ADMIN_PASSWORD, ADMIN_USERNAME, FRONTEND_DIR
 from .db import Base, SessionLocal, engine
+from .genre_classifier import seed_default_keywords_if_empty
 from .models import AccessToken, AdminUser
 from .routers import admin, channels, health, playlist, vod
 
@@ -38,6 +39,7 @@ def on_startup():
     Base.metadata.create_all(bind=engine)
     _ensure_dev_token()
     _ensure_admin_user()
+    _ensure_genre_keywords()
 
 
 def _ensure_dev_token():
@@ -91,6 +93,18 @@ def _ensure_admin_user():
         else:
             existing.password_hash = password_hash
         db.commit()
+    finally:
+        db.close()
+
+
+def _ensure_genre_keywords():
+    """Semeia a lista padrão de palavras-chave (EN+PT) só na primeira vez —
+    depois disso quem edita é o usuário via /genres.html, nunca sobrescrevemos."""
+    db = SessionLocal()
+    try:
+        added = seed_default_keywords_if_empty(db)
+        if added:
+            logger.info("Semeadas %d palavras-chave de gênero padrão.", added)
     finally:
         db.close()
 

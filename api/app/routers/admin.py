@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth_admin import SESSION_COOKIE_NAME, create_session, require_admin, verify_password
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
+from ..genre_classifier import get_classify_job, start_classify_job
 from ..import_vod import get_import_job, start_import_job
-from ..models import AccessToken, AdminUser, VodItem, VodTitle
+from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle
 
 router = APIRouter(prefix="/admin")
 
@@ -55,6 +56,20 @@ class EpisodeRequest(BaseModel):
 class UpdateItemRequest(BaseModel):
     stream_url: Optional[str] = None
     episode_title: Optional[str] = None
+
+
+class LiveChannelRequest(BaseModel):
+    tvg_id: str
+    name: str
+    category: Optional[str] = None
+    logo_url: Optional[str] = None
+    is_broadcast_tv: bool = False
+    stream_url: str
+
+
+class GenreKeywordRequest(BaseModel):
+    genre: str
+    keyword: str
 
 
 @router.post("/login")
@@ -281,3 +296,118 @@ def delete_item(item_id: int, db: Session = Depends(get_db), _admin: AdminUser =
     db.delete(item)
     db.commit()
     return {"ok": True}
+
+
+# --- Canais de TV ao vivo (cadastro manual, complementa o worker automático) ---
+
+
+@router.post("/channels")
+def add_live_channel(
+    payload: LiveChannelRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Se o tvg_id já existir, só adiciona esse link como mais um mirror do
+    canal existente (não duplica canal) — útil tanto pra cadastrar um canal
+    novo quanto pra reforçar um que o worker já trouxe com poucos mirrors."""
+    channel = db.query(Channel).filter(Channel.tvg_id == payload.tvg_id).first()
+    is_new_channel = channel is None
+
+    if channel is None:
+        channel = Channel(
+            tvg_id=payload.tvg_id,
+            name=payload.name,
+            category=payload.category,
+            logo_url=payload.logo_url,
+            is_broadcast_tv=payload.is_broadcast_tv,
+            is_active=True,
+        )
+        db.add(channel)
+        db.flush()
+    else:
+        # atualiza metadados só se vierem preenchidos, nunca apaga o que já tinha
+        if payload.name:
+            channel.name = payload.name
+        if payload.category:
+            channel.category = payload.category
+        if payload.logo_url:
+            channel.logo_url = payload.logo_url
+        channel.is_broadcast_tv = channel.is_broadcast_tv or payload.is_broadcast_tv
+
+    existing_stream = db.query(Stream).filter(Stream.channel_id == channel.id, Stream.url == payload.stream_url).first()
+    stream_added = existing_stream is None
+    if existing_stream is None:
+        db.add(Stream(channel_id=channel.id, url=payload.stream_url))
+
+    db.commit()
+    return {"channel_id": channel.id, "new_channel": is_new_channel, "stream_added": stream_added}
+
+
+# --- Palavras-chave de gênero (classificação automática, editável) ---
+
+
+@router.get("/genre-keywords")
+def list_genre_keywords(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    rows = db.query(GenreKeyword).order_by(GenreKeyword.id).all()
+    genres: dict[str, list[dict]] = {}
+    first_id: dict[str, int] = {}
+    for row in rows:
+        genres.setdefault(row.genre, []).append({"id": row.id, "keyword": row.keyword})
+        first_id.setdefault(row.genre, row.id)
+    ordered = sorted(genres.keys(), key=lambda g: first_id[g])
+    return {"genres": [{"genre": g, "keywords": genres[g]} for g in ordered]}
+
+
+@router.post("/genre-keywords")
+def add_genre_keyword(
+    payload: GenreKeywordRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    genre = payload.genre.strip()
+    keyword = payload.keyword.strip()
+    if not genre or not keyword:
+        raise HTTPException(status_code=400, detail="Gênero e palavra-chave são obrigatórios")
+
+    exists = db.query(GenreKeyword).filter(GenreKeyword.genre == genre, GenreKeyword.keyword == keyword).first()
+    if exists:
+        return {"id": exists.id}
+
+    row = GenreKeyword(genre=genre, keyword=keyword)
+    db.add(row)
+    db.commit()
+    return {"id": row.id}
+
+
+@router.delete("/genre-keywords/{keyword_id}")
+def delete_genre_keyword(keyword_id: int, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    row = db.query(GenreKeyword).filter(GenreKeyword.id == keyword_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Palavra-chave não encontrada")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/genre-keywords/genre/{genre}")
+def delete_genre(genre: str, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    """Remove um gênero inteiro (todas as palavras dele)."""
+    deleted = db.query(GenreKeyword).filter(GenreKeyword.genre == genre).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "removidas": deleted}
+
+
+@router.post("/vod/classify-genres")
+def classify_genres(_admin: AdminUser = Depends(require_admin)):
+    """Dispara em background: classifica por palavra-chave todo título VOD com
+    genre NULL. Nunca sobrescreve gênero já preenchido."""
+    job_id = start_classify_job()
+    return {"job_id": job_id}
+
+
+@router.get("/vod/classify-genres/{job_id}/status")
+def classify_genres_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_classify_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
+    return job
