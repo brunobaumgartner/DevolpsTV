@@ -114,7 +114,7 @@ def admin_list_vod(db: Session = Depends(get_db), _admin: AdminUser = Depends(re
     }
 
 
-_MAX_CSV_BYTES = 5 * 1024 * 1024  # 5MB é bem mais que suficiente pra uma lista de títulos
+_MAX_CSV_BYTES = 100 * 1024 * 1024  # 100MB — alinhado com o client_max_body_size do nginx
 
 
 @router.post("/vod/import-csv")

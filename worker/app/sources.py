@@ -1,8 +1,17 @@
-"""Fontes de canais/streams BR. Cada `load_*` devolve ChannelEntry normalizados,
-já sem os que nosso health-check HTTP não consegue validar de verdade (YouTube,
-protocolos não-HTTP etc). ALL_SOURCES define a ordem de prioridade: a primeira
-fonte que trouxer um dado (nome/logo/categoria) pra um tvg_id "ganha"; as
-seguintes só completam o que faltar e somam mirrors novos."""
+"""Fontes de canais/streams em português. Cada `load_*` devolve ChannelEntry
+normalizados, já sem os que nosso health-check HTTP não consegue validar de
+verdade (YouTube, protocolos não-HTTP etc). ALL_SOURCES define a ordem de
+prioridade: a primeira fonte que trouxer um dado (nome/logo/categoria) pra um
+tvg_id "ganha"; as seguintes só completam o que faltar e somam mirrors novos.
+
+Escopo (2026-09-09): não é só Brasil — é qualquer canal de língua portuguesa.
+O iptv-org/api não tem campo de idioma no canal (só em `feeds.json`, por feed,
+o que exigiria filtrar streams por feed em vez de por canal — mais complexo e
+arriscado de fazer errado). Por ora o critério é país de língua oficial
+portuguesa (`LUSOPHONE_COUNTRY_CODES`), que já cobre a esmagadora maioria com
+segurança. Canais de língua portuguesa hospedados em outros países (feeds
+dublados de redes internacionais, por exemplo) ficam de fora por ora — ver
+ARQUITETURA.md seção 2.1."""
 
 import logging
 import re
@@ -17,7 +26,11 @@ from .config import BROADCAST_TV_NAME_HINTS
 logger = logging.getLogger("iptv-worker.sources")
 
 REQUEST_TIMEOUT = 30
-COUNTRY_CODE = "BR"
+
+# países cuja língua oficial é o português (medido em 2026-09-09 contra o
+# iptv-org/api: 1.062 canais no total — BR 796, PT 144, AO 52, MZ 51, CV 11,
+# GW 2, ST 1, TL 5)
+LUSOPHONE_COUNTRY_CODES = {"BR", "PT", "AO", "MZ", "CV", "GW", "ST", "TL"}
 
 IPTV_ORG_CHANNELS_URL = "https://iptv-org.github.io/api/channels.json"
 IPTV_ORG_STREAMS_URL = "https://iptv-org.github.io/api/streams.json"
@@ -148,16 +161,16 @@ def _build_logo_map(channel_ids: set) -> dict:
 
 def load_iptv_org() -> Iterable[ChannelEntry]:
     channels_data = _fetch_json(IPTV_ORG_CHANNELS_URL)
-    br_channels = [
+    pt_channels = [
         c for c in channels_data
-        if c.get("country") == COUNTRY_CODE and not c.get("closed") and not c.get("is_nsfw")
+        if c.get("country") in LUSOPHONE_COUNTRY_CODES and not c.get("closed") and not c.get("is_nsfw")
     ]
-    br_ids = {c["id"] for c in br_channels}
-    logger.info("[iptv-org] canais BR: %d", len(br_ids))
+    pt_ids = {c["id"] for c in pt_channels}
+    logger.info("[iptv-org] canais em português (8 países): %d", len(pt_ids))
 
-    logo_map = _build_logo_map(br_ids)
+    logo_map = _build_logo_map(pt_ids)
     channel_meta = {}
-    for info in br_channels:
+    for info in pt_channels:
         categories = info.get("categories") or []
         channel_meta[info["id"]] = {
             "name": info.get("name") or info["id"],
@@ -166,10 +179,10 @@ def load_iptv_org() -> Iterable[ChannelEntry]:
         }
 
     streams_data = _fetch_json(IPTV_ORG_STREAMS_URL)
-    br_streams = [s for s in streams_data if s.get("channel") in br_ids and _is_playable_url(s.get("url"))]
-    logger.info("[iptv-org] streams BR: %d", len(br_streams))
+    pt_streams = [s for s in streams_data if s.get("channel") in pt_ids and _is_playable_url(s.get("url"))]
+    logger.info("[iptv-org] streams em português: %d", len(pt_streams))
 
-    for s in br_streams:
+    for s in pt_streams:
         tvg_id = s["channel"]
         meta = channel_meta.get(tvg_id, {})
         yield ChannelEntry(
