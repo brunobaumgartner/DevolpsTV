@@ -51,6 +51,20 @@ class Program(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class VodItem(Base):
+    """Cópia mínima do model da API — o worker só precisa disso pra testar a
+    saúde dos links de VOD no healthcheck periódico, não pra gerenciar
+    filme/série (isso é só na API/admin)."""
+
+    __tablename__ = "vod_items"
+
+    id = Column(Integer, primary_key=True)
+    stream_url = Column(String(1000))
+    is_healthy = Column(Boolean)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    last_checked_at = Column(DateTime)
+
+
 class WorkerRun(Base):
     """1 linha por job (fetch_channels/healthcheck/fetch_epg), sempre
     atualizada (não é histórico) — só pra dar visibilidade de quando cada job

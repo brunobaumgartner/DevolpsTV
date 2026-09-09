@@ -14,6 +14,7 @@ from ..channel_classifier import get_classify_channels_job, start_classify_chann
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
 from ..genre_classifier import get_classify_job, start_classify_job
+from ..imdb_classifier import get_imdb_classify_job, is_dataset_available, start_imdb_classify_job
 from ..import_vod import get_import_job, start_import_job
 from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle
@@ -455,6 +456,35 @@ def classify_genres(_admin: AdminUser = Depends(require_admin)):
 @router.get("/vod/classify-genres/{job_id}/status")
 def classify_genres_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
     job = get_classify_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
+    return job
+
+
+@router.get("/vod/imdb-dataset-status")
+def imdb_dataset_status(_admin: AdminUser = Depends(require_admin)):
+    return {"available": is_dataset_available()}
+
+
+@router.post("/vod/classify-genres-imdb")
+def classify_genres_imdb(_admin: AdminUser = Depends(require_admin)):
+    """Dispara em background: casa cada título (filme OU série) com uma obra
+    real do IMDb pelo título exato (original ou a tradução em PT-BR) e herda
+    o gênero de lá. Diferente do /vod/classify-genres (palavra-chave), este
+    SOBRESCREVE gênero já preenchido quando acha um match melhor — corrige
+    palpites errados, não só preenche vazio."""
+    if not is_dataset_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Dataset do IMDb não encontrado no servidor (title.basics.tsv.gz / title.akas.tsv.gz).",
+        )
+    job_id = start_imdb_classify_job()
+    return {"job_id": job_id}
+
+
+@router.get("/vod/classify-genres-imdb/{job_id}/status")
+def classify_genres_imdb_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_imdb_classify_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
     return job

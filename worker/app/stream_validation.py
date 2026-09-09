@@ -23,6 +23,11 @@ exigia `#EXTM3U` sempre e rejeitava esses links como se estivessem quebrados.
 Agora, quando o corpo não é um m3u8, checa se parece MPEG-TS de verdade
 (Content-Type e/ou os sync bytes do próprio conteúdo) antes de rejeitar.
 
+Causa raiz #4 (confirmada 2026-09-09): o catálogo VOD (filmes/séries) usa
+bastante link .mp4 direto — outro formato sem `#EXTM3U`. Reconhecido pela
+"ftyp box" no início do arquivo (assinatura padrão de qualquer MP4/MOV
+válido: 4 bytes de tamanho + "ftyp") e/ou Content-Type video/mp4.
+
 Cópia da lógica de api/app/stream_validation.py — duplicada de propósito
 porque API e worker são serviços/imagens Docker separados (ver ARQUITETURA.md
 seção 6). Qualquer correção aqui precisa ser espelhada lá.
@@ -84,6 +89,13 @@ def _looks_like_raw_mpeg_ts(data: bytes) -> bool:
     return all(data[i * _TS_PACKET_SIZE] == _TS_SYNC_BYTE for i in range(checked))
 
 
+def _looks_like_mp4(data: bytes) -> bool:
+    """Todo MP4/MOV válido tem uma "ftyp box" logo no início: 4 bytes de
+    tamanho + o literal 'ftyp'. Suficiente pra distinguir de HTML de erro,
+    JSON, texto etc. sem precisar de um parser de MP4 de verdade."""
+    return len(data) >= 8 and data[4:8] == b"ftyp"
+
+
 def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | None, bytes] | None:
     """GET com corpo limitado. None se a request falhar ou o status for erro;
     senão (Content-Type, corpo bruto)."""
@@ -130,9 +142,10 @@ def stream_is_really_playable(url: str, timeout: float, headers: dict | None = N
         sub_text = _get_manifest_text(sub_url, timeout, headers)
         return sub_text is not None and sub_text.lstrip().startswith("#EXTM3U")
 
-    # não é m3u8 — pode ser um .ts bruto direto, sem manifesto por cima. Aceita
-    # se o Content-Type confirma (video/mp2t é o valor padrão pra isso) OU se o
-    # próprio conteúdo já parece MPEG-TS de verdade.
-    if content_type and "mp2t" in content_type.lower():
+    # não é m3u8 — pode ser um .ts bruto ou um .mp4 direto, sem manifesto por
+    # cima. Aceita se o Content-Type confirma (video/mp2t ou video/mp4) OU se
+    # o próprio conteúdo já parece um desses formatos de verdade.
+    content_type_lower = (content_type or "").lower()
+    if "mp2t" in content_type_lower or "mp4" in content_type_lower:
         return True
-    return _looks_like_raw_mpeg_ts(data)
+    return _looks_like_raw_mpeg_ts(data) or _looks_like_mp4(data)

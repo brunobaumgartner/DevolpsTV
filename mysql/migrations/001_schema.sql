@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS vod_items (
     episode_number INT NULL,
     episode_title VARCHAR(500) NULL,
     stream_url VARCHAR(1000) NULL,
+    -- espelham as colunas equivalentes de streams (canais ao vivo) — o
+    -- health-check manual/automático testa VOD junto com TV ao vivo
+    is_healthy BOOLEAN NULL,
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    last_checked_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_vod_item_title FOREIGN KEY (title_id) REFERENCES vod_titles(id) ON DELETE CASCADE,
     KEY idx_title (title_id)

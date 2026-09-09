@@ -346,15 +346,21 @@ function renderDashboard(stats) {
 
     <section class="panel">
       <h2>Classificação automática de gênero</h2>
+      <p style="color: var(--muted); font-size: 12px; margin: 0 0 12px;">
+        Tenta casar cada título com uma obra real do IMDb primeiro (corrige até
+        gênero já preenchido errado); o que sobrar sem match usa palavra-chave
+        no título como último recurso; o que ainda assim não achar nada fica
+        sem gênero.
+      </p>
       <div class="classify-row">
-        <button id="classify-btn">Classificar gêneros</button>
-        <span class="classify-msg" id="classify-msg">
+        <button id="classify-imdb-btn">Classificar gêneros</button>
+        <span class="classify-msg" id="classify-imdb-msg">
           ${stats.vod.total_titles ? "" : "Sem títulos no catálogo ainda."}
         </span>
       </div>
-      <div class="progress-wrap" id="classify-progress-wrap" hidden>
-        <div class="progress-track"><div class="progress-fill" id="classify-progress-bar"></div></div>
-        <div class="progress-text" id="classify-progress-text"></div>
+      <div class="progress-wrap" id="classify-imdb-progress-wrap" hidden>
+        <div class="progress-track"><div class="progress-fill" id="classify-imdb-progress-bar"></div></div>
+        <div class="progress-text" id="classify-imdb-progress-text"></div>
       </div>
     </section>
 
@@ -404,11 +410,6 @@ function renderDashboard(stats) {
     </section>
   `;
 
-  document.getElementById("classify-btn").addEventListener("click", startClassify);
-  if (pendingClassifyMsg) {
-    document.getElementById("classify-msg").textContent = pendingClassifyMsg;
-  }
-
   document.getElementById("healthcheck-btn").addEventListener("click", startHealthcheck);
   if (pendingHealthcheckMsg) {
     document.getElementById("healthcheck-msg").textContent = pendingHealthcheckMsg;
@@ -419,6 +420,11 @@ function renderDashboard(stats) {
     document.getElementById("classify-channels-msg").textContent = pendingClassifyChannelsMsg;
   }
 
+  document.getElementById("classify-imdb-btn").addEventListener("click", startClassifyImdb);
+  if (pendingClassifyImdbMsg) {
+    document.getElementById("classify-imdb-msg").textContent = pendingClassifyImdbMsg;
+  }
+
   document.getElementById("streams-card").addEventListener("click", openStreamsModal);
 
   document.querySelectorAll(".clickable-genre").forEach((el) => {
@@ -426,86 +432,18 @@ function renderDashboard(stats) {
   });
 }
 
-let classifyRunning = false;
-let pendingClassifyMsg = null;
 let healthcheckRunning = false;
 let pendingHealthcheckMsg = null;
 let classifyChannelsRunning = false;
 let pendingClassifyChannelsMsg = null;
+let classifyImdbRunning = false;
+let pendingClassifyImdbMsg = null;
 
 function showProgress(wrap, bar, text, processed, total, label) {
   wrap.hidden = false;
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
   bar.style.width = pct + "%";
   text.textContent = `${label}: ${processed}/${total} (${pct}%)`;
-}
-
-async function startClassify() {
-  if (classifyRunning) return;
-  classifyRunning = true;
-
-  const btn = document.getElementById("classify-btn");
-  const msg = document.getElementById("classify-msg");
-  const wrap = document.getElementById("classify-progress-wrap");
-  const bar = document.getElementById("classify-progress-bar");
-  const text = document.getElementById("classify-progress-text");
-
-  btn.disabled = true;
-  msg.textContent = "Iniciando...";
-  showProgress(wrap, bar, text, 0, 1, "Classificando");
-
-  try {
-    const resp = await apiFetch("admin/vod/classify-genres", { method: "POST" });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      wrap.hidden = true;
-      msg.textContent = body.detail || "Falha ao iniciar.";
-      return;
-    }
-    const body = await resp.json();
-    await pollClassifyJob(body.job_id, msg, wrap, bar, text);
-  } catch {
-    wrap.hidden = true;
-    msg.textContent = "Falha de rede.";
-  } finally {
-    btn.disabled = false;
-    classifyRunning = false;
-  }
-}
-
-async function pollClassifyJob(jobId, msg, wrap, bar, text) {
-  while (true) {
-    let job;
-    try {
-      const resp = await apiFetch(`admin/vod/classify-genres/${jobId}/status`);
-      job = await resp.json();
-    } catch {
-      wrap.hidden = true;
-      msg.textContent = "Falha de rede ao consultar o progresso.";
-      return;
-    }
-
-    showProgress(wrap, bar, text, job.processed, job.total, "Classificando");
-
-    if (job.status === "done") {
-      wrap.hidden = true;
-      // load() recria o painel do zero (novo <span id="classify-msg">), então o
-      // texto seria perdido na hora — guarda numa variável e renderDashboard()
-      // reaplica ela no elemento novo depois de renderizar.
-      pendingClassifyMsg = `${job.classified} de ${job.total} título(s) sem gênero foram classificados.`;
-      msg.textContent = pendingClassifyMsg;
-      load();
-      return;
-    }
-    if (job.status === "error") {
-      wrap.hidden = true;
-      pendingClassifyMsg = "Erro: " + (job.error || "desconhecido");
-      msg.textContent = pendingClassifyMsg;
-      return;
-    }
-
-    await new Promise((r) => setTimeout(r, 800));
-  }
 }
 
 async function startHealthcheck() {
@@ -692,6 +630,73 @@ async function loadStreamsTab(tab) {
   }
 }
 
+async function startClassifyImdb() {
+  if (classifyImdbRunning) return;
+  classifyImdbRunning = true;
+
+  const btn = document.getElementById("classify-imdb-btn");
+  const msg = document.getElementById("classify-imdb-msg");
+  const wrap = document.getElementById("classify-imdb-progress-wrap");
+  const bar = document.getElementById("classify-imdb-progress-bar");
+  const text = document.getElementById("classify-imdb-progress-text");
+
+  btn.disabled = true;
+  msg.textContent = "Iniciando...";
+  showProgress(wrap, bar, text, 0, 1, "Lendo dataset do IMDb");
+
+  try {
+    const resp = await apiFetch("admin/vod/classify-genres-imdb", { method: "POST" });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      wrap.hidden = true;
+      msg.textContent = body.detail || "Falha ao iniciar.";
+      return;
+    }
+    const body = await resp.json();
+    await pollClassifyImdbJob(body.job_id, msg, wrap, bar, text);
+  } catch {
+    wrap.hidden = true;
+    msg.textContent = "Falha de rede.";
+  } finally {
+    btn.disabled = false;
+    classifyImdbRunning = false;
+  }
+}
+
+async function pollClassifyImdbJob(jobId, msg, wrap, bar, text) {
+  while (true) {
+    let job;
+    try {
+      const resp = await apiFetch(`admin/vod/classify-genres-imdb/${jobId}/status`);
+      job = await resp.json();
+    } catch {
+      wrap.hidden = true;
+      msg.textContent = "Falha de rede ao consultar o progresso.";
+      return;
+    }
+
+    showProgress(wrap, bar, text, job.processed, job.total, job.phase || "Processando");
+
+    if (job.status === "done") {
+      wrap.hidden = true;
+      pendingClassifyImdbMsg =
+        `IMDb: ${job.newly_classified} novo(s), ${job.corrected} corrigido(s). ` +
+        `Palavra-chave (o que sobrou): ${job.keyword_classified} novo(s).`;
+      msg.textContent = pendingClassifyImdbMsg;
+      load();
+      return;
+    }
+    if (job.status === "error") {
+      wrap.hidden = true;
+      pendingClassifyImdbMsg = "Erro: " + (job.error || "desconhecido");
+      msg.textContent = pendingClassifyImdbMsg;
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
+}
+
 let genreAssignType = null;
 let genreAssignOffset = 0;
 const GENRE_ASSIGN_PAGE_SIZE = 20;
@@ -833,7 +838,7 @@ setInterval(() => {
   // não re-renderiza enquanto a classificação de gêneros/canais ou o
   // health-check manual estão em andamento — evitaria substituir a barra de
   // progresso no meio do processo
-  if (!classifyRunning && !healthcheckRunning && !classifyChannelsRunning) load();
+  if (!healthcheckRunning && !classifyChannelsRunning && !classifyImdbRunning) load();
 }, 30000);
 </script>
 </body>

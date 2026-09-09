@@ -101,6 +101,12 @@ class VodItem(Base):
     stream_url = Column(String(1000))
     created_at = Column(DateTime, server_default=func.now())
 
+    # espelham as colunas equivalentes de Stream (canais ao vivo) — o
+    # health-check manual/automático testa VOD junto com TV ao vivo agora
+    is_healthy = Column(Boolean)
+    consecutive_failures = Column(Integer, nullable=False, server_default="0")
+    last_checked_at = Column(DateTime)
+
     vod_title = relationship("VodTitle", back_populates="items")
 
 
