@@ -2,11 +2,13 @@ import logging
 
 from ..db import SessionLocal
 from ..epg_sources import EPG_SOURCE_URLS, fetch_and_parse, normalize_channel_name
+from ..job_tracking import track_job
 from ..models import Channel, Program
 
 logger = logging.getLogger("iptv-worker.fetch_epg")
 
 
+@track_job("fetch_epg")
 def run():
     logger.info("Buscando EPG de %d fonte(s) (BrazilTVEPG)...", len(EPG_SOURCE_URLS))
 
@@ -83,5 +85,6 @@ def run():
             total_matched_channels,
             total_programs_inserted,
         )
+        return {"canais_com_epg": total_matched_channels, "programas": total_programs_inserted}
     finally:
         db.close()

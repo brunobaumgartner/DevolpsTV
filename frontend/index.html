@@ -3,60 +3,99 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>IPTV-BR (teste)</title>
+<title>DevolpsTV</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #0f1115;
-    --card: #1a1d24;
-    --text: #e8e8ea;
-    --muted: #8a8f98;
-    --accent: #4f8cff;
-    --border: #2a2e37;
+    color-scheme: dark;
+    --bg: #030509;
+    --bg-grid: #060a12;
+    --card: #0a1420;
+    --card-hover: #0e1c2e;
+    --text: #d7e6f5;
+    --muted: #5b7a94;
+    --accent: #00d9ff;
+    --accent-dim: #0a3a4d;
+    --accent2: #2f6fff;
+    --border: #123049;
+    --danger: #ff3d6e;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    background: var(--bg);
+    background:
+      radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
+      radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%),
+      var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1, h2, .tab-btn, .vod-type-tabs button, .type-tag, .cat-btn, button {
+    font-family: "Chakra Petch", "Rajdhani", system-ui, sans-serif;
   }
   header {
     padding: 16px 20px;
     border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,217,255,0.05), transparent);
     display: flex;
     gap: 12px;
     align-items: center;
     flex-wrap: wrap;
   }
-  header h1 { font-size: 16px; margin: 0; margin-right: auto; color: var(--muted); font-weight: 600; }
-  input[type="text"] {
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    margin-right: auto;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,217,255,.5);
+  }
+  input[type="text"], select {
     background: var(--card);
     border: 1px solid var(--border);
     color: var(--text);
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: 4px;
     width: 320px;
     font-size: 13px;
+    font-family: "Rajdhani", sans-serif;
+  }
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(0,217,255,.35);
   }
   button {
-    background: var(--accent);
-    color: white;
+    background: var(--accent2);
+    color: #041018;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    color: #041018;
     border: none;
     padding: 8px 14px;
-    border-radius: 6px;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    box-shadow: 0 0 14px rgba(0,217,255,.25);
   }
+  button:hover { box-shadow: 0 0 18px rgba(0,217,255,.5); }
   button.secondary {
     background: var(--card);
     border: 1px solid var(--border);
-    color: var(--text);
+    color: var(--muted);
+    box-shadow: none;
   }
+  button.secondary:hover { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 10px rgba(0,217,255,.2); }
+  button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); box-shadow: none; }
   main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px 20px; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  video { width: 100%; background: black; border-radius: 8px; aspect-ratio: 16/9; }
+  video { width: 100%; background: black; border-radius: 4px; aspect-ratio: 16/9; border: 1px solid var(--border); }
   #status { color: var(--muted); font-size: 13px; margin-top: 8px; }
   .categories { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
   .cat-btn {
@@ -64,11 +103,11 @@
     border: 1px solid var(--border);
     color: var(--muted);
     padding: 5px 10px;
-    border-radius: 999px;
+    border-radius: 3px;
     font-size: 12px;
   }
-  .cat-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-  .channel-list { max-height: 70vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .cat-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(0,217,255,.25); }
+  .channel-list { max-height: 70vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: rgba(255,255,255,.01); }
   .channel-item {
     display: flex;
     align-items: center;
@@ -78,8 +117,8 @@
     cursor: pointer;
     font-size: 13px;
   }
-  .channel-item:hover { background: var(--card); }
-  .channel-item.playing { background: #22304f; }
+  .channel-item:hover { background: var(--card-hover); }
+  .channel-item.playing { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
   .channel-item img { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: #222; }
   .channel-item .name { flex: 1; }
   .channel-item .badge {
@@ -105,25 +144,70 @@
     padding: 8px 4px;
     margin-right: 16px;
     font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
   }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); text-shadow: 0 0 8px rgba(0,217,255,.4); }
+  .vod-controls { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .vod-controls input[type="text"] { width: 100%; }
+  .vod-type-tabs { display: flex; gap: 6px; }
+  .vod-type-tabs button {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .vod-type-tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(0,217,255,.25); }
+  #vod-genre { max-width: 200px; }
+  .vod-count { color: var(--muted); font-size: 11px; margin: 2px 0 6px; }
   .vod-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
-    max-height: 70vh;
+    max-height: 60vh;
     overflow-y: auto;
   }
-  .vod-card { cursor: pointer; font-size: 12px; }
+  .vod-card { cursor: pointer; font-size: 12px; transition: transform .12s; }
+  .vod-card:hover { transform: translateY(-2px); }
+  .vod-card .poster-wrap { position: relative; }
   .vod-card .poster {
     width: 100%;
     aspect-ratio: 2/3;
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     object-fit: cover;
     display: block;
   }
+  .vod-card:hover .poster, .vod-card:hover .poster-placeholder { border-color: var(--accent); box-shadow: 0 0 12px rgba(0,217,255,.3); }
+  .vod-card .poster-placeholder {
+    width: 100%;
+    aspect-ratio: 2/3;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    border: 1px solid var(--border);
+  }
+  .vod-card .poster-placeholder.movie { background: linear-gradient(160deg, #0d2b52, #081826); }
+  .vod-card .poster-placeholder.series { background: linear-gradient(160deg, #063a45, #061826); }
+  .vod-card .type-tag {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 3px;
+    color: #041018;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .vod-card .type-tag.movie { background: var(--accent2); }
+  .vod-card .type-tag.series { background: var(--accent); }
   .vod-card .vod-title { margin-top: 4px; line-height: 1.3; }
   .vod-card .vod-badge {
     display: inline-block;
@@ -136,6 +220,8 @@
   }
   .vod-card .vod-badge.available { color: var(--accent); border-color: var(--accent); }
   .vod-empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
+  .vod-pager { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .vod-pager button:disabled { opacity: .4; cursor: default; }
   #epg-panel { margin-top: 14px; }
   #epg-panel h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   .epg-item { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -148,9 +234,10 @@
 </head>
 <body>
 <header>
-  <h1>IPTV-BR — painel de teste</h1>
-  <input id="token" type="text" placeholder="cole seu token de acesso aqui" />
-  <button id="load-btn">Carregar canais</button>
+  <h1>DevolpsTV</h1>
+  <button id="my-list-btn" hidden>▶ Acessar minha lista</button>
+  <input id="token" type="text" placeholder="Cole o link (ou token) da sua playlist" hidden />
+  <button id="load-btn" hidden>Carregar</button>
   <a href="admin.html" style="color: var(--muted); font-size: 12px;">admin</a>
 </header>
 
@@ -173,7 +260,22 @@
     </div>
 
     <div id="vod-panel" hidden>
+      <div class="vod-controls">
+        <input type="text" id="vod-search" placeholder="Buscar por título..." />
+        <div class="vod-type-tabs" id="vod-type-tabs">
+          <button class="active" data-type="">Todos</button>
+          <button data-type="movie">Filmes</button>
+          <button data-type="series">Séries</button>
+        </div>
+        <select id="vod-genre"><option value="">Todos os gêneros</option></select>
+      </div>
+      <div class="vod-count" id="vod-count"></div>
       <div id="vod-grid" class="vod-grid"></div>
+      <div class="vod-pager">
+        <button class="secondary" id="vod-prev-page">◀ Anterior</button>
+        <span id="vod-page-info"></span>
+        <button class="secondary" id="vod-next-page">Próxima ▶</button>
+      </div>
     </div>
   </section>
 </main>
@@ -226,13 +328,59 @@ const storage = safeLocalStorage();
 
 tokenInput.value = (storage && storage.getItem("iptv_token")) || "";
 
-loadBtn.addEventListener("click", loadChannels);
-tokenInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadChannels(); });
+const myListBtn = document.getElementById("my-list-btn");
 
-async function loadChannels() {
-  const token = tokenInput.value.trim();
+loadBtn.addEventListener("click", () => loadChannels());
+tokenInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loadChannels(); });
+myListBtn.addEventListener("click", loadMyList);
+
+// aceita tanto o token puro quanto o link inteiro da playlist/painel
+// (ex: http://.../p/<token>/playlist.m3u8) — extrai o token dos dois jeitos
+function extractToken(input) {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/p\/([^/]+)\//);
+  return match ? match[1] : trimmed;
+}
+
+// se estiver logado como admin, oferece um botão direto pra própria lista em
+// vez de precisar colar token/link manualmente — quem não está logado como
+// admin continua colando o link normalmente
+(async function initHeader() {
+  try {
+    const resp = await fetch("admin/me", { credentials: "include" });
+    if (resp.ok) {
+      myListBtn.hidden = false;
+      return;
+    }
+  } catch {}
+  tokenInput.hidden = false;
+  loadBtn.hidden = false;
+})();
+
+async function loadMyList() {
+  statusEl.textContent = "Buscando sua playlist...";
+  try {
+    const resp = await fetch("admin/tokens", { credentials: "include" });
+    if (!resp.ok) {
+      statusEl.textContent = "Não foi possível localizar sua playlist automaticamente.";
+      return;
+    }
+    const data = await resp.json();
+    const token = data.tokens?.[0]?.token;
+    if (!token) {
+      statusEl.textContent = "Nenhum token de acesso cadastrado ainda.";
+      return;
+    }
+    await loadChannels(token);
+  } catch {
+    statusEl.textContent = "Falha de rede ao buscar sua playlist.";
+  }
+}
+
+async function loadChannels(tokenOverride) {
+  const token = tokenOverride || extractToken(tokenInput.value);
   if (!token) {
-    statusEl.textContent = "Cole um token válido primeiro.";
+    statusEl.textContent = "Cole um link ou token válido primeiro.";
     return;
   }
   if (storage) storage.setItem("iptv_token", token);
@@ -446,6 +594,56 @@ function playUrl(url, onFatalError) {
 // --- Filmes e Séries (catálogo VOD) ---
 
 let currentVodTitles = [];
+let vodActiveType = ""; // "" | "movie" | "series"
+let vodActiveGenre = "";
+let vodSearchTerm = "";
+let vodPage = 0;
+const VOD_PAGE_SIZE = 60;
+
+const vodSearchEl = document.getElementById("vod-search");
+const vodGenreEl = document.getElementById("vod-genre");
+const vodTypeTabsEl = document.getElementById("vod-type-tabs");
+const vodCountEl = document.getElementById("vod-count");
+const vodPageInfoEl = document.getElementById("vod-page-info");
+const vodPrevBtn = document.getElementById("vod-prev-page");
+const vodNextBtn = document.getElementById("vod-next-page");
+
+let vodSearchDebounce = null;
+vodSearchEl.addEventListener("input", () => {
+  clearTimeout(vodSearchDebounce);
+  vodSearchDebounce = setTimeout(() => {
+    vodSearchTerm = vodSearchEl.value.trim().toLowerCase();
+    vodPage = 0;
+    renderVodGrid();
+  }, 200);
+});
+
+vodTypeTabsEl.querySelectorAll("button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    vodTypeTabsEl.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    vodActiveType = btn.dataset.type;
+    vodPage = 0;
+    renderVodGrid();
+  });
+});
+
+vodGenreEl.addEventListener("change", () => {
+  vodActiveGenre = vodGenreEl.value;
+  vodPage = 0;
+  renderVodGrid();
+});
+
+vodPrevBtn.addEventListener("click", () => {
+  if (vodPage > 0) {
+    vodPage--;
+    renderVodGrid();
+  }
+});
+vodNextBtn.addEventListener("click", () => {
+  vodPage++;
+  renderVodGrid();
+});
 
 async function loadVod() {
   vodGridEl.innerHTML = `<div class="vod-empty">Carregando...</div>`;
@@ -458,26 +656,75 @@ async function loadVod() {
     const data = await resp.json();
     vodLoaded = true;
     currentVodTitles = data.titles || [];
+    populateVodGenres();
     renderVodGrid();
   } catch {
     vodGridEl.innerHTML = `<div class="vod-empty">Falha de rede ao carregar o catálogo.</div>`;
   }
 }
 
+function populateVodGenres() {
+  const genres = Array.from(new Set(currentVodTitles.map((t) => t.genre).filter(Boolean))).sort();
+  vodGenreEl.innerHTML =
+    `<option value="">Todos os gêneros</option>` + genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+}
+
+function filteredVodTitles() {
+  return currentVodTitles.filter((t) => {
+    if (vodActiveType && t.type !== vodActiveType) return false;
+    if (vodActiveGenre && t.genre !== vodActiveGenre) return false;
+    if (vodSearchTerm && !t.title.toLowerCase().includes(vodSearchTerm)) return false;
+    return true;
+  });
+}
+
 function renderVodGrid() {
   if (!currentVodTitles.length) {
     vodGridEl.innerHTML = `<div class="vod-empty">Catálogo ainda vazio — adicione títulos conforme for conseguindo autorização (ver README.md).</div>`;
+    vodCountEl.textContent = "";
+    vodPageInfoEl.textContent = "";
+    vodPrevBtn.disabled = true;
+    vodNextBtn.disabled = true;
     return;
   }
+
+  const filtered = filteredVodTitles();
+  if (!filtered.length) {
+    vodGridEl.innerHTML = `<div class="vod-empty">Nenhum título encontrado com esse filtro.</div>`;
+    vodCountEl.textContent = `0 de ${currentVodTitles.length} título(s)`;
+    vodPageInfoEl.textContent = "";
+    vodPrevBtn.disabled = true;
+    vodNextBtn.disabled = true;
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / VOD_PAGE_SIZE));
+  vodPage = Math.min(vodPage, totalPages - 1);
+  const start = vodPage * VOD_PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + VOD_PAGE_SIZE);
+
+  vodCountEl.textContent = `${filtered.length} de ${currentVodTitles.length} título(s)`;
+  vodPageInfoEl.textContent = `Página ${vodPage + 1} de ${totalPages}`;
+  vodPrevBtn.disabled = vodPage <= 0;
+  vodNextBtn.disabled = vodPage >= totalPages - 1;
+
   vodGridEl.innerHTML = "";
-  currentVodTitles.forEach((t) => {
+  pageItems.forEach((t) => {
     const card = document.createElement("div");
     card.className = "vod-card";
     const badge = t.available
       ? '<span class="vod-badge available">disponível</span>'
       : '<span class="vod-badge">sem link ainda</span>';
+    const typeLabel = t.type === "movie" ? "Filme" : "Série";
+    const typeClass = t.type === "movie" ? "movie" : "series";
+    const posterHtml = t.poster_url
+      ? `<img class="poster" src="${escapeHtml(t.poster_url)}" alt="" onerror="this.outerHTML='<div class=&quot;poster-placeholder ${typeClass}&quot;>${typeClass === "movie" ? "🎬" : "📺"}</div>'">`
+      : `<div class="poster-placeholder ${typeClass}">${typeClass === "movie" ? "🎬" : "📺"}</div>`;
     card.innerHTML = `
-      ${t.poster_url ? `<img class="poster" src="${escapeHtml(t.poster_url)}" alt="" onerror="this.style.visibility='hidden'">` : `<div class="poster"></div>`}
+      <div class="poster-wrap">
+        ${posterHtml}
+        <span class="type-tag ${typeClass}">${typeLabel}</span>
+      </div>
       <div class="vod-title">${escapeHtml(t.title)}</div>
       ${badge}
     `;

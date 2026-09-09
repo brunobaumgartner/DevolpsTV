@@ -75,6 +75,16 @@ CREATE TABLE IF NOT EXISTS vod_items (
     KEY idx_title (title_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 1 linha por job do worker, sempre atualizada (nao e historico) -- ultima
+-- execucao de fetch_channels/healthcheck/fetch_epg, pro dashboard.
+CREATE TABLE IF NOT EXISTS worker_runs (
+    job_name VARCHAR(50) PRIMARY KEY,
+    last_run_at DATETIME NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    summary VARCHAR(500) NULL,
+    duration_seconds INT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS access_tokens (
     id INT AUTO_INCREMENT PRIMARY KEY,
     token VARCHAR(64) NOT NULL,

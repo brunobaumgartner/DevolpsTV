@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Admin — IPTV-BR</title>
+<title>Admin — DevolpsTV</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -78,7 +78,8 @@
 </head>
 <body>
 <header>
-  <h1>IPTV-BR — cadastro de filmes e séries</h1>
+  <h1>DevolpsTV — cadastro de filmes e séries</h1>
+  <a href="dashboard.html" style="color: var(--muted); font-size: 13px;">Dashboard</a>
   <button class="secondary" id="logout-btn">Sair</button>
 </header>
 
@@ -143,6 +144,12 @@
       <div style="flex: 0 0 auto;"><button id="csv-upload-btn">Importar</button></div>
     </div>
     <div class="msg" id="csv-msg"></div>
+    <div id="csv-progress-wrap" hidden style="margin-top:8px;">
+      <div style="background: var(--border); border-radius: 6px; height: 8px; overflow: hidden;">
+        <div id="csv-progress-bar" style="background: var(--accent); height: 100%; width: 0%; transition: width .2s;"></div>
+      </div>
+      <div id="csv-progress-text" style="font-size: 11px; color: var(--muted); margin-top: 4px;"></div>
+    </div>
   </section>
 
   <section>
@@ -286,6 +293,22 @@ document.getElementById("s-add-btn").addEventListener("click", async () => {
   } catch {}
 });
 
+const csvProgressWrap = document.getElementById("csv-progress-wrap");
+const csvProgressBar = document.getElementById("csv-progress-bar");
+const csvProgressText = document.getElementById("csv-progress-text");
+const csvUploadBtn = document.getElementById("csv-upload-btn");
+
+function showCsvProgress(processed, total) {
+  csvProgressWrap.hidden = false;
+  const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+  csvProgressBar.style.width = pct + "%";
+  csvProgressText.textContent = `Processando: ${processed}/${total} linha(s) (${pct}%)`;
+}
+
+function hideCsvProgress() {
+  csvProgressWrap.hidden = true;
+}
+
 document.getElementById("csv-upload-btn").addEventListener("click", async () => {
   const msg = document.getElementById("csv-msg");
   const fileInput = document.getElementById("csv-file");
@@ -294,6 +317,10 @@ document.getElementById("csv-upload-btn").addEventListener("click", async () => 
 
   const formData = new FormData();
   formData.append("file", file);
+
+  csvUploadBtn.disabled = true;
+  setMsg(msg, "Enviando arquivo...", false);
+  showCsvProgress(0, 1);
 
   try {
     // upload de arquivo usa multipart/form-data — o navegador define o
@@ -309,20 +336,57 @@ document.getElementById("csv-upload-btn").addEventListener("click", async () => 
     }
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
+      hideCsvProgress();
+      csvUploadBtn.disabled = false;
       return setMsg(msg, body.detail || "Falha ao importar.", true);
     }
-    const ignoradas = body.linhas_ignoradas?.length ? `, ${body.linhas_ignoradas.length} linha(s) ignorada(s)` : "";
-    setMsg(
-      msg,
-      `Importado: ${body.titulos_novos} título(s) novo(s), ${body.titulos_atualizados} atualizado(s), ${body.itens_novos} item(ns) novo(s), ${body.itens_atualizados} atualizado(s)${ignoradas}.`,
-      false
-    );
+
+    setMsg(msg, "Processando...", false);
+    await pollImportJob(body.job_id, msg);
     fileInput.value = "";
     loadCatalog();
   } catch {
+    hideCsvProgress();
     setMsg(msg, "Falha de rede ao importar.", true);
+  } finally {
+    csvUploadBtn.disabled = false;
   }
 });
+
+async function pollImportJob(jobId, msg) {
+  while (true) {
+    let job;
+    try {
+      const resp = await apiFetch(`admin/vod/import-csv/${jobId}/status`);
+      job = await resp.json();
+    } catch {
+      hideCsvProgress();
+      setMsg(msg, "Falha de rede ao consultar o progresso.", true);
+      return;
+    }
+
+    showCsvProgress(job.processed, job.total);
+
+    if (job.status === "done") {
+      hideCsvProgress();
+      const s = job.stats || {};
+      const ignoradas = s.linhas_ignoradas?.length ? `, ${s.linhas_ignoradas.length} linha(s) ignorada(s)` : "";
+      setMsg(
+        msg,
+        `Importado: ${s.titulos_novos ?? 0} título(s) novo(s), ${s.titulos_atualizados ?? 0} atualizado(s), ${s.itens_novos ?? 0} item(ns) novo(s), ${s.itens_atualizados ?? 0} atualizado(s)${ignoradas}.`,
+        false
+      );
+      return;
+    }
+    if (job.status === "error") {
+      hideCsvProgress();
+      setMsg(msg, "Erro ao importar: " + (job.error || "desconhecido"), true);
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 800));
+  }
+}
 
 async function loadCatalog() {
   const listEl = document.getElementById("catalog-list");

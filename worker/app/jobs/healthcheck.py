@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from ..config import HEALTHCHECK_MAX_WORKERS, HEALTHCHECK_TIMEOUT_SEC
 from ..db import SessionLocal
+from ..job_tracking import track_job
 from ..models import Stream
 from ..stream_validation import stream_is_really_playable
 
@@ -21,13 +22,14 @@ def _check_stream(stream_id: int, url: str, referrer: str | None, user_agent: st
     return stream_id, healthy
 
 
+@track_job("healthcheck")
 def run():
     db = SessionLocal()
     try:
         streams = db.query(Stream).all()
         if not streams:
             logger.info("Nenhum stream cadastrado ainda, pulando health-check.")
-            return
+            return {"streams": 0, "saudaveis": 0}
 
         logger.info("Testando %d streams (max_workers=%d)...", len(streams), HEALTHCHECK_MAX_WORKERS)
 
@@ -52,6 +54,7 @@ def run():
 
         db.commit()
         logger.info("Health-check concluído: %d/%d streams saudáveis.", healthy_count, len(streams))
+        return {"streams": len(streams), "saudaveis": healthy_count}
     except Exception:
         db.rollback()
         logger.exception("Erro ao rodar health-check")

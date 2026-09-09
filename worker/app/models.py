@@ -49,3 +49,18 @@ class Program(Base):
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class WorkerRun(Base):
+    """1 linha por job (fetch_channels/healthcheck/fetch_epg), sempre
+    atualizada (não é histórico) — só pra dar visibilidade de quando cada job
+    rodou por último e com que resultado, já que hoje isso só existe no log
+    do container (que se perde). Ver dashboard.html."""
+
+    __tablename__ = "worker_runs"
+
+    job_name = Column(String(50), primary_key=True)
+    last_run_at = Column(DateTime, nullable=False)
+    status = Column(String(20), nullable=False)  # "ok" ou "error"
+    summary = Column(String(500))
+    duration_seconds = Column(Integer)

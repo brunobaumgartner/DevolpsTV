@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard — DevolpsTV</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #030509;
+    --card: #0a1420;
+    --card-hover: #0e1c2e;
+    --text: #d7e6f5;
+    --muted: #5b7a94;
+    --accent: #00d9ff;
+    --accent-dim: #0a3a4d;
+    --accent2: #2f6fff;
+    --border: #123049;
+    --ok: #2be07a;
+    --warn: #ffb020;
+    --danger: #ff3d6e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
+      radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Rajdhani", system-ui, sans-serif;
+  }
+  h1, h2, h3 { font-family: "Chakra Petch", "Rajdhani", sans-serif; }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,217,255,0.05), transparent);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,217,255,.5);
+  }
+  header nav { margin-left: auto; display: flex; gap: 16px; }
+  header nav a { color: var(--muted); font-size: 13px; text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  #refresh-info { color: var(--muted); font-size: 11px; }
+  main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat-card .value { font-size: 30px; font-weight: 700; margin-top: 6px; color: var(--accent); text-shadow: 0 0 14px rgba(0,217,255,.35); }
+  .stat-card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .stat-card.ok .value { color: var(--ok); text-shadow: 0 0 14px rgba(43,224,122,.35); }
+  .stat-card.warn .value { color: var(--warn); text-shadow: 0 0 14px rgba(255,176,32,.35); }
+  section.panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+  section.panel h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 14px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 8px; }
+  .bar-row .bar-label { width: 130px; color: var(--muted); flex-shrink: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+  .bar-row .bar-track { flex: 1; background: rgba(255,255,255,.04); border-radius: 3px; height: 10px; overflow: hidden; }
+  .bar-row .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+  .bar-row .bar-count { width: 40px; text-align: right; color: var(--text); flex-shrink: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); }
+  .job-status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .job-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .job-dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .job-dot.error { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+  .job-dot.stale { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .loading, .error-msg { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+  .error-msg { color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>📡 DevolpsTV — Dashboard</h1>
+  <nav>
+    <a href="admin.html">Cadastro</a>
+    <a href="index.html">Player</a>
+  </nav>
+  <span id="refresh-info"></span>
+</header>
+
+<main id="app">
+  <div class="loading">Carregando...</div>
+</main>
+
+<script>
+async function apiFetch(path) {
+  const resp = await fetch(path, { credentials: "include" });
+  if (resp.status === 401) {
+    window.location.href = "login.html";
+    throw new Error("não autenticado");
+  }
+  return resp;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
+function fmtAge(seconds) {
+  if (seconds == null) return "nunca rodou";
+  if (seconds < 60) return `há ${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `há ${Math.floor(seconds / 60)}min`;
+  if (seconds < 86400) return `há ${Math.floor(seconds / 3600)}h`;
+  return `há ${Math.floor(seconds / 86400)}d`;
+}
+
+const JOB_LABELS = {
+  fetch_channels: "Buscar canais/streams",
+  healthcheck: "Health-check de streams",
+  fetch_epg: "Buscar EPG",
+};
+
+// jobs esperados a rodar com essa frequência (minutos) — usado só pra marcar
+// "atrasado" no dashboard, não afeta o agendamento real do worker
+const JOB_EXPECTED_INTERVAL_MIN = {
+  fetch_channels: 360,
+  healthcheck: 15,
+  fetch_epg: 180,
+};
+
+function renderDashboard(stats) {
+  const app = document.getElementById("app");
+
+  const channelPct = stats.channels.total_active
+    ? Math.round((stats.channels.with_healthy_stream / stats.channels.total_active) * 100)
+    : 0;
+  const streamPct = stats.streams.total ? Math.round((stats.streams.healthy / stats.streams.total) * 100) : 0;
+  const vodLinkPct = stats.vod.total_items ? Math.round((stats.vod.items_with_link / stats.vod.total_items) * 100) : 0;
+
+  const maxCategoryCount = Math.max(1, ...stats.channels.by_category.map((c) => c.count));
+  const categoryBars = stats.channels.by_category
+    .slice(0, 12)
+    .map(
+      (c) => `
+      <div class="bar-row">
+        <div class="bar-label">${escapeHtml(c.category)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(c.count / maxCategoryCount) * 100}%"></div></div>
+        <div class="bar-count">${c.count}</div>
+      </div>`
+    )
+    .join("");
+
+  const jobRows = Object.keys(JOB_LABELS)
+    .map((jobName) => {
+      const job = stats.worker_jobs.find((j) => j.job_name === jobName);
+      if (!job) {
+        return `<tr><td>${JOB_LABELS[jobName]}</td><td><span class="job-status"><span class="job-dot stale"></span>nunca rodou</span></td><td>—</td><td>—</td></tr>`;
+      }
+      const expectedSeconds = (JOB_EXPECTED_INTERVAL_MIN[jobName] || 60) * 60 * 2.5; // 2.5x de tolerância
+      const isStale = job.age_seconds != null && job.age_seconds > expectedSeconds;
+      const dotClass = job.status === "error" ? "error" : isStale ? "stale" : "ok";
+      const statusLabel = job.status === "error" ? "erro" : isStale ? "atrasado" : "ok";
+      return `<tr>
+        <td>${JOB_LABELS[jobName]}</td>
+        <td><span class="job-status"><span class="job-dot ${dotClass}"></span>${statusLabel}</span></td>
+        <td>${fmtAge(job.age_seconds)}</td>
+        <td style="color:var(--muted); font-size:11px;">${escapeHtml(job.summary || "")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  app.innerHTML = `
+    <div class="grid">
+      <div class="stat-card ${channelPct >= 50 ? "ok" : "warn"}">
+        <div class="label">Canais ativos</div>
+        <div class="value">${stats.channels.total_active}</div>
+        <div class="sub">${stats.channels.with_healthy_stream} funcionando agora (${channelPct}%)</div>
+      </div>
+      <div class="stat-card ${streamPct >= 50 ? "ok" : "warn"}">
+        <div class="label">Streams saudáveis</div>
+        <div class="value">${stats.streams.healthy}</div>
+        <div class="sub">de ${stats.streams.total} mirrors testados (${streamPct}%)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">TV aberta</div>
+        <div class="value">${stats.channels.broadcast_tv}</div>
+        <div class="sub">canais nacionais identificados</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">EPG</div>
+        <div class="value">${stats.epg.channels_with_epg}</div>
+        <div class="sub">canais com programação (${stats.epg.total_programs} programas)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Catálogo VOD</div>
+        <div class="value">${stats.vod.total_titles}</div>
+        <div class="sub">${stats.vod.movies} filmes · ${stats.vod.series} séries</div>
+      </div>
+      <div class="stat-card ${vodLinkPct >= 50 ? "ok" : "warn"}">
+        <div class="label">Itens VOD com link</div>
+        <div class="value">${stats.vod.items_with_link}</div>
+        <div class="sub">de ${stats.vod.total_items} itens (${vodLinkPct}%)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Tokens de acesso ativos</div>
+        <div class="value">${stats.access_tokens}</div>
+        <div class="sub">links de playlist em uso</div>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>Jobs do worker</h2>
+      <table>
+        <thead><tr><th>Job</th><th>Status</th><th>Última execução</th><th>Resumo</th></tr></thead>
+        <tbody>${jobRows}</tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Canais por categoria</h2>
+      ${categoryBars || '<div class="loading">Sem dados.</div>'}
+    </section>
+  `;
+}
+
+async function load() {
+  const app = document.getElementById("app");
+  try {
+    const resp = await apiFetch("admin/dashboard");
+    if (!resp.ok) {
+      app.innerHTML = `<div class="error-msg">Falha ao carregar o dashboard.</div>`;
+      return;
+    }
+    const stats = await resp.json();
+    renderDashboard(stats);
+    document.getElementById("refresh-info").textContent = "Atualizado " + new Date().toLocaleTimeString("pt-BR");
+  } catch (e) {
+    if (e.message !== "não autenticado") {
+      app.innerHTML = `<div class="error-msg">Falha de rede ao carregar o dashboard.</div>`;
+    }
+  }
+}
+
+load();
+setInterval(load, 30000); // auto-refresh a cada 30s
+</script>
+</body>
+</html>

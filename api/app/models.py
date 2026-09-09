@@ -126,6 +126,19 @@ class AdminSession(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class WorkerRun(Base):
+    """1 linha por job do worker (fetch_channels/healthcheck/fetch_epg), sempre
+    atualizada — última execução de cada um, pro dashboard."""
+
+    __tablename__ = "worker_runs"
+
+    job_name = Column(String(50), primary_key=True)
+    last_run_at = Column(DateTime, nullable=False)
+    status = Column(String(20), nullable=False)
+    summary = Column(String(500))
+    duration_seconds = Column(Integer)
+
+
 class AccessToken(Base):
     __tablename__ = "access_tokens"
 

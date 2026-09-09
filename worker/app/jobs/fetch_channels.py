@@ -1,14 +1,19 @@
 import logging
 
 from ..db import SessionLocal
+from ..job_tracking import track_job
 from ..models import Channel, Stream
 from ..sources import ALL_SOURCES, is_broadcast_tv
 
 logger = logging.getLogger("iptv-worker.fetch_channels")
 
 
+@track_job("fetch_channels")
 def run():
     logger.info("Buscando canais/streams de %d fonte(s) configurada(s)...", len(ALL_SOURCES))
+
+    total_new_channels = 0
+    total_new_streams = 0
 
     db = SessionLocal()
     try:
@@ -49,10 +54,17 @@ def run():
 
                 db.commit()  # commita por fonte: se uma fonte falhar, não perde as anteriores
                 logger.info("[%s] +%d canal(is) novo(s), +%d stream(s) novo(s)", source_name, new_channels, new_streams)
+                total_new_channels += new_channels
+                total_new_streams += new_streams
             except Exception:
                 db.rollback()
                 logger.exception("[%s] erro ao processar fonte, seguindo pras próximas", source_name)
 
         logger.info("Fetch concluído. Total de canais conhecidos: %d", len(channel_by_tvg_id))
+        return {
+            "canais_conhecidos": len(channel_by_tvg_id),
+            "canais_novos": total_new_channels,
+            "streams_novos": total_new_streams,
+        }
     finally:
         db.close()

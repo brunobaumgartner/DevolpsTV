@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth_admin import SESSION_COOKIE_NAME, create_session, require_admin, verify_password
+from ..dashboard import get_dashboard_stats
 from ..db import get_db
-from ..import_vod import import_rows_from_text
-from ..models import AdminUser, VodItem, VodTitle
+from ..import_vod import get_import_job, start_import_job
+from ..models import AccessToken, AdminUser, VodItem, VodTitle
 
 router = APIRouter(prefix="/admin")
 
@@ -85,6 +86,20 @@ def me(admin: AdminUser = Depends(require_admin)):
     return {"username": admin.username}
 
 
+@router.get("/dashboard")
+def dashboard(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    return get_dashboard_stats(db)
+
+
+@router.get("/tokens")
+def list_tokens(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    """Usado pelo botão 'Acessar minha lista' no painel: como só existe 1 admin
+    (uso pessoal), qualquer token ativo cadastrado é 'do admin' — não há hoje
+    uma associação formal token↔usuário além disso."""
+    tokens = db.query(AccessToken).filter(AccessToken.is_active.is_(True)).order_by(AccessToken.created_at).all()
+    return {"tokens": [{"token": t.token, "label": t.label} for t in tokens]}
+
+
 @router.get("/vod")
 def admin_list_vod(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
     titles = db.query(VodTitle).options(joinedload(VodTitle.items)).order_by(VodTitle.title).all()
@@ -124,10 +139,17 @@ async def import_csv_upload(
 ):
     """Mesma lógica do `python -m app.import_vod` (idempotente, nunca apaga um
     stream_url existente com uma célula em branco), só que via upload no painel
-    web em vez de precisar copiar o arquivo pra VPS antes."""
+    web em vez de precisar copiar o arquivo pra VPS antes.
+
+    Não processa o CSV na hora — dispara um job em background e devolve o
+    job_id na mesma hora. Pra CSVs grandes o processamento pode levar minutos
+    (cada linha é uma consulta/gravação no banco), e fazer isso dentro da
+    própria requisição HTTP trava o navegador esperando com zero feedback
+    (achado real em 2026-09-09) e ainda arrisca dar timeout no proxy antes de
+    terminar. O painel consulta o progresso em /vod/import-csv/{job_id}/status."""
     raw = await file.read(_MAX_CSV_BYTES + 1)
     if len(raw) > _MAX_CSV_BYTES:
-        raise HTTPException(status_code=413, detail="CSV maior que 5MB")
+        raise HTTPException(status_code=413, detail=f"CSV maior que {_MAX_CSV_BYTES // (1024*1024)}MB")
 
     try:
         text = raw.decode("utf-8-sig")
@@ -135,11 +157,19 @@ async def import_csv_upload(
         raise HTTPException(status_code=400, detail="Arquivo precisa ser CSV em UTF-8")
 
     try:
-        stats = import_rows_from_text(text)
+        job_id = start_import_job(text)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return stats
+    return {"job_id": job_id}
+
+
+@router.get("/vod/import-csv/{job_id}/status")
+def import_csv_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_import_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de importação não encontrado (ou o container reiniciou)")
+    return job
 
 
 @router.post("/vod/movie")
