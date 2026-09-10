@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg text-text font-body;
+    margin: 0;
+    min-height: 100dvh;
+    background-image:
+      radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
+      radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3 {
+    @apply font-display;
+  }
+  /* esconde scrollbar das fileiras horizontais mantendo o scroll */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 rounded px-3.5 py-2 text-xs font-semibold uppercase tracking-wide
+      bg-gradient-to-br from-accent to-accent2 text-[#041018] shadow-glow;
+  }
+  .btn:hover {
+    @apply shadow-glow-lg;
+  }
+  .btn-ghost {
+    @apply bg-card-hover border border-border text-muted shadow-none;
+  }
+  .btn-ghost:hover {
+    @apply text-accent border-accent;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-border bg-card-hover
+      px-3 py-1 text-xs text-muted;
+  }
+  .chip.active {
+    @apply bg-gradient-to-br from-accent to-accent2 text-[#041018] border-transparent font-semibold;
+  }
+  .row-scroll {
+    @apply flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4 px-4 md:px-8;
+  }
+  .card-poster {
+    @apply relative shrink-0 snap-start w-[120px] md:w-[150px] aspect-[2/3] rounded-md overflow-hidden
+      border border-border bg-card cursor-pointer transition-transform;
+  }
+  .card-poster:hover {
+    @apply -translate-y-0.5 border-accent;
+  }
+}
