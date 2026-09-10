@@ -23,8 +23,8 @@ export function Header({ isAdmin }) {
   return (
     <header
       class={
-        "sticky top-0 z-30 flex items-center gap-4 px-4 md:px-8 py-3 transition-colors " +
-        (solid ? "bg-bg/95 backdrop-blur border-b border-border" : "bg-gradient-to-b from-bg/80 to-transparent")
+        "sticky top-0 z-40 flex items-center gap-4 px-4 md:px-8 py-3 transition-colors " +
+        (solid ? "bg-bg/95 backdrop-blur border-b border-border" : "bg-bg/80 backdrop-blur-sm")
       }
     >
       <Link href="/" class="font-display font-bold tracking-widest uppercase text-accent text-[15px] drop-shadow-[0_0_10px_rgba(0,217,255,.5)]">

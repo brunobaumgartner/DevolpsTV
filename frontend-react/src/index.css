@@ -49,7 +49,7 @@
     @apply bg-gradient-to-br from-accent to-accent2 text-[#041018] border-transparent font-semibold;
   }
   .row-scroll {
-    @apply flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-4 px-4 md:px-8;
+    @apply flex gap-3 overflow-x-auto no-scrollbar snap-x scroll-px-4 px-4 md:px-8;
   }
   .card-poster {
     @apply relative shrink-0 snap-start w-[120px] md:w-[150px] aspect-[2/3] rounded-md overflow-hidden
