@@ -2,8 +2,8 @@ import { useState } from "preact/hooks";
 
 const EMOJI = { movie: "🎬", series: "📺", channel: "📡" };
 
-// pôster (VOD) ou logo de canal
-export function Card({ kind, title, image, subtitle, badge, onClick }) {
+// pôster (VOD) ou logo de canal. `fill` = ocupa a célula toda (uso em grid)
+export function Card({ kind, title, image, subtitle, badge, onClick, fill }) {
   const [broken, setBroken] = useState(false);
   const showImg = image && !broken;
 
@@ -39,7 +39,7 @@ export function Card({ kind, title, image, subtitle, badge, onClick }) {
   }
 
   return (
-    <button onClick={onClick} class="card-poster">
+    <button onClick={onClick} class={"card-poster" + (fill ? " !w-full" : "")}>
       {showImg ? (
         <img
           src={image}

@@ -4,6 +4,8 @@ import { Header } from "./components/Header.jsx";
 import { TokenGate } from "./components/TokenGate.jsx";
 import { Home } from "./pages/Home.jsx";
 import { Watch } from "./pages/Watch.jsx";
+import { VodList } from "./pages/VodList.jsx";
+import { LiveTV } from "./pages/LiveTV.jsx";
 import { Stub } from "./pages/Stub.jsx";
 
 export function App() {
@@ -23,11 +25,11 @@ export function App() {
         <Switch fallback={<Stub />}>
           <Route path="/" component={Home} />
           <Route path="/assistir/:tipo/:id" component={Watch} />
-          <Route path="/tv" component={Stub} />
-          <Route path="/filmes" component={Stub} />
-          <Route path="/series" component={Stub} />
-          <Route path="/animes" component={Stub} />
-          <Route path="/genero/:nome" component={Stub} />
+          <Route path="/tv" component={LiveTV} />
+          <Route path="/filmes" render={() => <VodList mode="movie" />} />
+          <Route path="/series" render={() => <VodList mode="series" />} />
+          <Route path="/animes" render={() => <VodList mode="anime" />} />
+          <Route path="/genero/:nome" render={({ params }) => <VodList mode="genre" params={params} />} />
           <Route path="/admin/*" component={Stub} />
         </Switch>
       </main>

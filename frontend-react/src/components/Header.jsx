@@ -43,6 +43,9 @@ export function Header({ isAdmin }) {
         ))}
       </nav>
       <div class="ml-auto flex items-center gap-3 text-[13px]">
+        <Link href="/filmes" class="text-muted hover:text-accent text-base" aria-label="Buscar">
+          🔍
+        </Link>
         {isAdmin && (
           <Link href="/admin" class="text-muted hover:text-accent">
             admin

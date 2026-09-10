@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from .models import Channel, Stream
 
@@ -40,8 +40,11 @@ def _best_stream(channel: Channel):
 
 
 def _active_channels(db: Session):
+    # joinedload dos streams: sem isso cada canal disparava 1 SELECT lazy dos
+    # próprios streams (N+1) — ~250 queries a mais por chamada de channels.json
     return (
         db.query(Channel)
+        .options(joinedload(Channel.streams))
         .filter(Channel.is_active.is_(True))
         .filter(Channel.streams.any(and_(Stream.is_healthy.is_(True))))
         .order_by(Channel.category, Channel.name)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -27,10 +27,14 @@ class FailureReport(BaseModel):
 @router.get("/p/{token}/channels.json")
 def list_channels(
     token: str,
+    response: Response,
     category: Optional[str] = None,
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
+    # muda no máximo a cada ciclo de health-check (15min); 120s é seguro e já
+    # evita rebaixar a lista ao navegar entre telas
+    response.headers["Cache-Control"] = "public, max-age=120"
     entries = [
         (channel, streams)
         for channel, streams in active_channels_with_all_streams(db)

@@ -5,7 +5,7 @@ automaticamente, e nenhuma fonte externa é consultada aqui."""
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -22,6 +22,7 @@ GENRE_NONE = "Outros"
 @router.get("/p/{token}/vod")
 def list_vod(
     token: str,
+    response: Response,
     type: Optional[str] = None,  # noqa: A002 - nome claro pro cliente
     genre: Optional[str] = None,
     q: Optional[str] = None,
@@ -30,6 +31,7 @@ def list_vod(
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
+    response.headers["Cache-Control"] = "public, max-age=120"
     """Listagem paginada e filtrada no servidor. NÃO devolve os episódios/itens
     (era isso que deixava lento: 25k títulos puxavam 237k itens juntos) — a
     disponibilidade e a contagem de episódios vêm de agregados baratos, e a
@@ -78,18 +80,67 @@ def list_vod(
     }
 
 
+def _genre_counts(db):
+    """[(genre_ou_'Outros', count)] ordenado do maior pro menor. 'Outros' (sem
+    gênero) sempre por último."""
+    rows = db.query(VodTitle.genre, func.count(VodTitle.id)).group_by(VodTitle.genre).all()
+    named = sorted(((g, c) for g, c in rows if g), key=lambda x: -x[1])
+    none_c = sum(c for g, c in rows if g is None)
+    if none_c:
+        named.append((GENRE_NONE, none_c))
+    return named
+
+
 @router.get("/p/{token}/vod/genres")
 def list_vod_genres(
     token: str,
+    response: Response,
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
-    """Gêneros distintos do catálogo (pro filtro), já com 'Outros' no fim se
-    houver título sem gênero. Sem 'Todos'."""
-    rows = db.query(VodTitle.genre, func.count(VodTitle.id)).group_by(VodTitle.genre).all()
-    named = sorted([g for g, _ in rows if g], key=str.lower)
-    has_none = any(g is None for g, _ in rows)
-    return {"genres": named + ([GENRE_NONE] if has_none else [])}
+    """Gêneros do catálogo com contagem, do maior pro menor ('Outros' por
+    último). Sem 'Todos'."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {"genres": [{"genre": g, "count": c} for g, c in _genre_counts(db)]}
+
+
+@router.get("/p/{token}/vod/home")
+def vod_home(
+    token: str,
+    response: Response,
+    per_genre: int = Query(15, ge=1, le=40),
+    max_genres: int = Query(12, ge=1, le=30),
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    response.headers["Cache-Control"] = "public, max-age=180"
+    """As primeiras fileiras da Home num request só (senão a Home dispara ~20
+    requests, um por gênero). Sem itens/episódios."""
+    out = []
+    for genre, _count in _genre_counts(db)[:max_genres]:
+        q = db.query(VodTitle)
+        if genre == GENRE_NONE:
+            q = q.filter(VodTitle.genre.is_(None))
+        else:
+            q = q.filter(VodTitle.genre == genre)
+        titles = q.order_by(VodTitle.id.desc()).limit(per_genre).all()
+        out.append(
+            {
+                "genre": genre,
+                "titles": [
+                    {
+                        "id": t.id,
+                        "type": t.type,
+                        "title": t.title,
+                        "poster_url": t.poster_url,
+                        "genre": t.genre or GENRE_NONE,
+                        "year": t.year,
+                    }
+                    for t in titles
+                ],
+            }
+        )
+    return {"rows": out}
 
 
 @router.get("/p/{token}/vod/{title_id}")

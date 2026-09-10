@@ -9,7 +9,7 @@ const goVod = (t) => navigate(`/assistir/${t.type === "series" ? "serie" : "film
 
 export function Home() {
   const channels = useFetch("channels", () => api.channels());
-  const genres = useFetch("vod-genres", () => api.vodGenres());
+  const home = useFetch("vod-home", () => api.vodHome(15)); // 1 request pras fileiras de VOD
 
   const chList = channels.data?.channels || [];
   const liveNow = chList.filter((c) => c.now_playing).slice(0, 20);
@@ -18,6 +18,15 @@ export function Home() {
 
   const channelCard = (c) => (
     <Card kind="channel" title={c.name} image={c.logo_url} subtitle={c.now_playing?.title} onClick={() => goChannel(c)} />
+  );
+  const vodCard = (t) => (
+    <Card
+      kind={t.type}
+      title={t.title}
+      image={t.poster_url}
+      badge={t.type === "series" ? "série" : "filme"}
+      onClick={() => goVod(t)}
+    />
   );
 
   return (
@@ -29,30 +38,20 @@ export function Home() {
       {cats.map((cat) => (
         <Row
           title={cat}
+          onSeeAll={() => navigate("/tv")}
           load={async () => chList.filter((c) => (c.category_label || "Outros") === cat).slice(0, 20)}
           renderItem={channelCard}
         />
       ))}
 
-      {(genres.data?.genres || []).map((g) => {
-        const name = typeof g === "string" ? g : g.genre;
-        return (
-          <Row
-            title={name}
-            onSeeAll={() => navigate(`/genero/${encodeURIComponent(name)}`)}
-            load={async () => (await api.vod({ genre: name, limit: 20 })).titles}
-            renderItem={(t) => (
-              <Card
-                kind={t.type}
-                title={t.title}
-                image={t.poster_url}
-                badge={t.type === "series" ? "série" : "filme"}
-                onClick={() => goVod(t)}
-              />
-            )}
-          />
-        );
-      })}
+      {(home.data?.rows || []).map((r) => (
+        <Row
+          title={r.genre}
+          onSeeAll={() => navigate(`/genero/${encodeURIComponent(r.genre)}`)}
+          load={async () => r.titles}
+          renderItem={vodCard}
+        />
+      ))}
     </div>
   );
 }
