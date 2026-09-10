@@ -52,7 +52,7 @@
     @apply flex gap-3 overflow-x-auto no-scrollbar snap-x scroll-px-4 px-4 md:px-8;
   }
   .card-poster {
-    @apply relative shrink-0 snap-start w-[120px] md:w-[150px] aspect-[2/3] rounded-md overflow-hidden
+    @apply relative shrink-0 snap-start w-[150px] md:w-[180px] aspect-[2/3] rounded-md overflow-hidden
       border border-border bg-card cursor-pointer transition-transform;
   }
   .card-poster:hover {

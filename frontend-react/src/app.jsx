@@ -1,6 +1,6 @@
 import { useSession } from "./lib/session.js";
 import { Switch, Route } from "./lib/router.jsx";
-import { Header } from "./components/Header.jsx";
+import { Sidebar } from "./components/Sidebar.jsx";
 import { TokenGate } from "./components/TokenGate.jsx";
 import { lazy } from "./lib/lazy.jsx";
 import { Home } from "./pages/Home.jsx";
@@ -23,8 +23,8 @@ export function App() {
 
   return (
     <>
-      <Header isAdmin={session.isAdmin} />
-      <main>
+      <Sidebar isAdmin={session.isAdmin} />
+      <main class="md:pl-[210px] min-h-[100dvh]">
         <Switch fallback={<Stub />}>
           <Route path="/" component={Home} />
           <Route path="/assistir/:tipo/:id" component={Watch} />

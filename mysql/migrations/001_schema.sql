@@ -65,8 +65,11 @@ CREATE TABLE IF NOT EXISTS vod_titles (
     title VARCHAR(500) NOT NULL,
     description TEXT NULL,
     poster_url VARCHAR(500) NULL,
+    backdrop_url VARCHAR(600) NULL,
     genre VARCHAR(100) NULL,
     year INT NULL,
+    rating FLOAT NULL,
+    tmdb_id INT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

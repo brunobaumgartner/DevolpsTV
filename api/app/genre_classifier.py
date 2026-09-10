@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 
 from .db import SessionLocal
+from .job_registry import is_cancelled, register
 from .models import GenreKeyword, VodTitle
 
 # ordem de prioridade da semente padrão: gêneros mais específicos primeiro,
@@ -250,6 +251,7 @@ def start_classify_job() -> str:
             "error": None,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+    register("Classificar gêneros (palavra-chave)", job_id, get_classify_job)
 
     def _worker():
         db = SessionLocal()
@@ -269,6 +271,11 @@ def start_classify_job() -> str:
                     with _jobs_lock:
                         _jobs[job_id]["processed"] = i
                         _jobs[job_id]["classified"] = classified
+                    if is_cancelled(job_id):
+                        db.commit()
+                        with _jobs_lock:
+                            _jobs[job_id]["status"] = "cancelled"
+                        return
 
             db.commit()
             with _jobs_lock:

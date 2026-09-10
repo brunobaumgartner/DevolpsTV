@@ -14,11 +14,13 @@ export function Watch({ params }) {
 
 function BackBar({ children }) {
   return (
-    <div class="flex items-center gap-3 px-4 md:px-8 py-3">
-      <button onClick={() => history.back()} class="text-sm text-muted hover:text-accent">
+    <div class="px-4 md:px-8 pt-3 pb-2">
+      <button onClick={() => history.back()} class="text-xs text-muted hover:text-accent">
         ← voltar
       </button>
-      <span class="text-sm text-text truncate">{children}</span>
+      <h1 class="mt-1 font-display text-xl md:text-2xl font-bold text-text truncate leading-tight">
+        {children}
+      </h1>
     </div>
   );
 }

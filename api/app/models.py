@@ -2,6 +2,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -87,8 +88,11 @@ class VodTitle(Base):
     title = Column(String(500), nullable=False)
     description = Column(Text)
     poster_url = Column(String(500))
+    backdrop_url = Column(String(600))
     genre = Column(String(100))
     year = Column(Integer)
+    rating = Column(Float)  # nota média do TMDB (0-10)
+    tmdb_id = Column(Integer)  # id do TMDB (pra futuras consultas de detalhe)
     created_at = Column(DateTime, server_default=func.now())
 
     items = relationship("VodItem", back_populates="vod_title", cascade="all, delete-orphan")

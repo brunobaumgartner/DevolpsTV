@@ -3,6 +3,7 @@ import { useFetch } from "../lib/useFetch.js";
 import { api } from "../lib/api.js";
 import { navigate } from "../lib/router.jsx";
 import { Card } from "../components/Card.jsx";
+import { ChipBar } from "../components/ChipBar.jsx";
 
 const norm = (s) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -34,20 +35,15 @@ export function LiveTV() {
         />
       </div>
 
-      <div class="flex gap-2 overflow-x-auto no-scrollbar px-4 md:px-8 pb-3">
-        {cats.map((c) => (
-          <button class={"chip shrink-0 " + (cat === c ? "active" : "")} onClick={() => setCat(cat === c ? null : c)}>
-            {c}
-          </button>
-        ))}
-      </div>
+      <ChipBar items={cats.map((c) => ({ value: c, label: c }))} active={cat} onSelect={setCat} />
 
       {loading && <div class="text-muted text-sm px-8 py-10">Carregando…</div>}
       {!loading && list.length === 0 && <div class="text-muted text-sm px-8 py-10">Nenhum canal.</div>}
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 px-4 md:px-8">
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4 px-4 md:px-8">
         {list.map((c) => (
           <Card
+            fill
             kind="channel"
             title={c.name}
             image={c.logo_url}

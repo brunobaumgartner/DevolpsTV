@@ -11,10 +11,13 @@ export function Card({ kind, title, image, subtitle, badge, onClick, fill }) {
     return (
       <button
         onClick={onClick}
-        class="shrink-0 snap-start w-[150px] md:w-[172px] rounded-md border border-border bg-card
-               hover:border-accent hover:-translate-y-0.5 transition-transform text-left overflow-hidden"
+        class={
+          "snap-start rounded-md border border-border bg-card hover:border-accent hover:-translate-y-0.5 " +
+          "transition-transform text-left overflow-hidden " +
+          (fill ? "" : "shrink-0 w-[150px] md:w-[180px]")
+        }
       >
-        <div class="h-[92px] grid place-items-center bg-card-hover p-3">
+        <div class="aspect-video grid place-items-center bg-card-hover p-2.5">
           {showImg ? (
             <img
               src={image}
@@ -25,14 +28,12 @@ export function Card({ kind, title, image, subtitle, badge, onClick, fill }) {
               onError={() => setBroken(true)}
             />
           ) : (
-            <span class="text-2xl opacity-50">{EMOJI.channel}</span>
+            <span class="text-xl opacity-40">{EMOJI.channel}</span>
           )}
         </div>
-        <div class="p-2">
-          <div class="text-[13px] font-semibold truncate">{title}</div>
-          <div class="text-[11px] text-muted truncate">
-            {subtitle ? <span class="text-accent">▶ {subtitle}</span> : " "}
-          </div>
+        <div class="px-2 py-1.5">
+          <div class="text-[12px] font-semibold truncate leading-tight">{title}</div>
+          {subtitle && <div class="text-[10px] text-accent truncate mt-0.5">▶ {subtitle}</div>}
         </div>
       </button>
     );

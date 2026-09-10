@@ -13,11 +13,15 @@ from ..auth_admin import SESSION_COOKIE_NAME, create_session, require_admin, ver
 from ..channel_classifier import get_classify_channels_job, start_classify_channels_job
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
+from ..db_console import QueryError, describe_table, list_tables, run_query
 from ..genre_classifier import get_classify_job, start_classify_job
 from ..imdb_classifier import get_imdb_classify_job, is_dataset_available, start_imdb_classify_job
+from ..job_registry import list_jobs, prune, request_cancel
+from ..poster_fetch import get_tmdb_job, start_tmdb_job
 from ..import_vod import get_import_job, start_import_job
 from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
-from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle
+from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle, WorkerRun
+from ..system_info import snapshot as system_snapshot
 
 router = APIRouter(prefix="/admin")
 
@@ -490,6 +494,23 @@ def classify_genres_imdb_status(job_id: str, _admin: AdminUser = Depends(require
     return job
 
 
+@router.post("/vod/fetch-metadata")
+def fetch_vod_metadata(_admin: AdminUser = Depends(require_admin)):
+    """Dispara em background: busca o pôster (e o ano, se faltar) no endpoint
+    público de autocomplete da IMDb pra todo título VOD sem pôster. Não precisa
+    de conta nem de chave. Nunca sobrescreve pôster já preenchido."""
+    job_id = start_tmdb_job()
+    return {"job_id": job_id}
+
+
+@router.get("/vod/fetch-metadata/{job_id}/status")
+def fetch_vod_metadata_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_tmdb_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
+    return job
+
+
 @router.post("/healthcheck")
 def run_healthcheck(_admin: AdminUser = Depends(require_admin)):
     """Dispara em background: testa TODOS os streams cadastrados agora, sem
@@ -560,3 +581,67 @@ def list_streams(
             for s in streams
         ]
     }
+
+
+# ---------- tela "Sistema": processos + consumo do servidor ----------
+
+
+@router.get("/system/jobs")
+def system_jobs(_admin: AdminUser = Depends(require_admin), db: Session = Depends(get_db)):
+    """Jobs em processo (threads dentro da API) + última execução de cada job
+    do worker (tabela worker_runs)."""
+    prune()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    worker_runs = [
+        {
+            "job_name": w.job_name,
+            "status": w.status,
+            "summary": w.summary,
+            "duration_seconds": w.duration_seconds,
+            "age_seconds": (now - w.last_run_at).total_seconds() if w.last_run_at else None,
+        }
+        for w in db.query(WorkerRun).order_by(WorkerRun.job_name).all()
+    ]
+    return {"in_process": list_jobs(), "worker_runs": worker_runs}
+
+
+@router.post("/system/jobs/{job_id}/cancel")
+def system_cancel_job(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    if not request_cancel(job_id):
+        raise HTTPException(status_code=404, detail="Job não encontrado (pode já ter terminado)")
+    return {"ok": True, "note": "cancelamento pedido — o job para no próximo checkpoint"}
+
+
+@router.get("/system/resources")
+def system_resources(_admin: AdminUser = Depends(require_admin)):
+    return system_snapshot()
+
+
+# ---------- tela "Banco": consulta somente-leitura ----------
+
+
+class SqlQuery(BaseModel):
+    sql: str
+
+
+@router.get("/db/tables")
+def db_tables(_admin: AdminUser = Depends(require_admin)):
+    return {"tables": list_tables()}
+
+
+@router.get("/db/tables/{name}")
+def db_table(name: str, _admin: AdminUser = Depends(require_admin)):
+    try:
+        return describe_table(name)
+    except QueryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/db/query")
+def db_query(payload: SqlQuery, _admin: AdminUser = Depends(require_admin)):
+    try:
+        return run_query(payload.sql)
+    except QueryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # erro de SQL do próprio banco
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}"[:400])

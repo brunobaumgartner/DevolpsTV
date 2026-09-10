@@ -3,8 +3,9 @@ import { api } from "../lib/api.js";
 import { useFetch } from "../lib/useFetch.js";
 import { navigate, useLocation } from "../lib/router.jsx";
 import { Card } from "../components/Card.jsx";
+import { ChipBar } from "../components/ChipBar.jsx";
 
-const PAGE = 60;
+const PAGE = 24;
 
 // /filmes (type=movie) · /series (type=series) · /animes (genre=Anime)
 // · /genero/:nome (genre=nome)
@@ -64,7 +65,7 @@ export function VodList({ mode, params }) {
 
   return (
     <div class="pb-16">
-      <div class="flex flex-wrap items-center gap-3 px-4 md:px-8 py-4">
+      <div class="flex flex-wrap items-center gap-3 px-4 md:px-8 pt-4">
         <h1 class="text-lg text-accent font-display mr-2">{titleTxt}</h1>
         <input
           value={q}
@@ -72,21 +73,15 @@ export function VodList({ mode, params }) {
           placeholder="Buscar título…"
           class="flex-1 min-w-[160px] bg-[#081019] border border-border rounded px-3 py-1.5 text-sm"
         />
-        {showGenreSelect && (
-          <select
-            value={genre}
-            onChange={(e) => setGenre(e.currentTarget.value)}
-            class="bg-[#081019] border border-border rounded px-2 py-1.5 text-sm"
-          >
-            <option value="">Gênero…</option>
-            {(genres.data?.genres || []).map((g) => (
-              <option value={g.genre}>
-                {g.genre} ({g.count})
-              </option>
-            ))}
-          </select>
-        )}
       </div>
+
+      {showGenreSelect && (
+        <ChipBar
+          items={(genres.data?.genres || []).map((g) => ({ value: g.genre, label: `${g.genre} (${g.count})` }))}
+          active={genre || null}
+          onSelect={(v) => setGenre(v || "")}
+        />
+      )}
 
       {loading && !data && <div class="text-muted text-sm px-8 py-10">Carregando…</div>}
 
@@ -96,7 +91,7 @@ export function VodList({ mode, params }) {
           {data.titles.length === 0 ? (
             <div class="text-muted text-sm px-8 py-10">Nada encontrado.</div>
           ) : (
-            <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 px-4 md:px-8">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4 px-4 md:px-8">
               {data.titles.map((t) => (
                 <Card
                   fill

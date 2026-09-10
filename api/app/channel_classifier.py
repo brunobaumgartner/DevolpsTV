@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from .db import SessionLocal
+from .job_registry import is_cancelled, register
 from .models import Channel
 
 # ordem de prioridade: categorias mais específicas primeiro — evita que um
@@ -132,6 +133,7 @@ def start_classify_channels_job() -> str:
             "error": None,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+    register("Classificar canais", job_id, get_classify_channels_job)
 
     def _worker():
         db = SessionLocal()
@@ -155,6 +157,11 @@ def start_classify_channels_job() -> str:
                     with _jobs_lock:
                         _jobs[job_id]["processed"] = i
                         _jobs[job_id]["classified"] = classified
+                    if is_cancelled(job_id):
+                        db.commit()
+                        with _jobs_lock:
+                            _jobs[job_id]["status"] = "cancelled"
+                        return
 
             db.commit()
             with _jobs_lock:

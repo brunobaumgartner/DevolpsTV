@@ -78,6 +78,12 @@ export function AdminDashboard() {
             format={(j) => `IMDb: ${j.newly_classified} novo(s), ${j.corrected} corrigido(s); palavra-chave: ${j.keyword_classified}.`}
           />
           <JobButton
+            label="Buscar capas + dados (TMDB)"
+            start={adminApi.startFetchMetadata}
+            poll={adminApi.fetchMetadataStatus}
+            format={(j) => `${j.matched} capa(s) e ${j.genres} gênero(s) preenchidos, de ${j.total} título(s).`}
+          />
+          <JobButton
             label="Health-check agora"
             start={adminApi.startHealthcheck}
             poll={adminApi.healthcheckStatus}

@@ -67,10 +67,22 @@ export const adminApi = {
   // jobs (todos: POST inicia -> {job_id}; GET status)
   startClassifyImdb: () => jpost("admin/vod/classify-genres-imdb"),
   classifyImdbStatus: (id) => req(`admin/vod/classify-genres-imdb/${id}/status`),
+  startFetchMetadata: () => jpost("admin/vod/fetch-metadata"),
+  fetchMetadataStatus: (id) => req(`admin/vod/fetch-metadata/${id}/status`),
   startHealthcheck: () => jpost("admin/healthcheck"),
   healthcheckStatus: (id) => req(`admin/healthcheck/${id}/status`),
   startClassifyChannels: () => jpost("admin/channels/classify-categories"),
   classifyChannelsStatus: (id) => req(`admin/channels/classify-categories/${id}/status`),
+
+  // sistema (processos + consumo)
+  systemJobs: () => req("admin/system/jobs"),
+  cancelJob: (id) => jpost(`admin/system/jobs/${id}/cancel`),
+  systemResources: () => req("admin/system/resources"),
+
+  // banco (consulta somente-leitura)
+  dbTables: () => req("admin/db/tables"),
+  dbTable: (name) => req(`admin/db/tables/${encodeURIComponent(name)}`),
+  dbQuery: (sql) => jpost("admin/db/query", { sql }),
 
   // gêneros manuais
   titlesWithoutGenre: (type, limit, offset) =>

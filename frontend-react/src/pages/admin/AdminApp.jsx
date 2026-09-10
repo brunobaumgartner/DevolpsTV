@@ -5,11 +5,15 @@ import { AdminLogin } from "./AdminLogin.jsx";
 import { AdminDashboard } from "./AdminDashboard.jsx";
 import { AdminGenres } from "./AdminGenres.jsx";
 import { AdminCatalog } from "./AdminCatalog.jsx";
+import { AdminSystem } from "./AdminSystem.jsx";
+import { AdminDb } from "./AdminDb.jsx";
 
 const TABS = [
   ["/admin", "Dashboard"],
   ["/admin/generos", "Gêneros"],
   ["/admin/cadastro", "Cadastro"],
+  ["/admin/sistema", "Sistema"],
+  ["/admin/banco", "Banco"],
 ];
 
 export function AdminApp() {
@@ -28,7 +32,16 @@ export function AdminApp() {
     return <AdminLogin onOk={() => { setAuth("yes"); navigate("/admin"); }} />;
   }
 
-  const Page = path === "/admin/generos" ? AdminGenres : path === "/admin/cadastro" ? AdminCatalog : AdminDashboard;
+  const Page =
+    path === "/admin/generos"
+      ? AdminGenres
+      : path === "/admin/cadastro"
+      ? AdminCatalog
+      : path === "/admin/sistema"
+      ? AdminSystem
+      : path === "/admin/banco"
+      ? AdminDb
+      : AdminDashboard;
 
   return (
     <div>

@@ -16,3 +16,9 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronten
 # versionado no git (são ~750MB juntos). Ausente = feature simplesmente
 # aparece indisponível no dashboard, sem quebrar nada.
 IMDB_DATA_DIR = os.environ.get("IMDB_DATA_DIR", "/app/data/imdb")
+
+# chave grátis v3 do TMDB (themoviedb.org -> Configurações -> API). Usada pra
+# enriquecer o catálogo VOD com pôster + sinopse + ano + gênero + fundo + nota
+# numa única busca — ver api/app/poster_fetch.py. Ausente = o botão do
+# dashboard devolve erro claro e nada acontece.
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")

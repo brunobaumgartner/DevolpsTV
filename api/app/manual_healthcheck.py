@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from .db import SessionLocal
+from .job_registry import is_cancelled, register
 from .models import Stream, VodItem, WorkerRun
 from .stream_validation import stream_is_really_playable
 
@@ -73,6 +74,7 @@ def start_healthcheck_job() -> str:
             "error": None,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+    register("Health-check", job_id, get_healthcheck_job)
 
     def _worker():
         start = time.monotonic()
@@ -115,6 +117,13 @@ def start_healthcheck_job() -> str:
                         _jobs[job_id]["processed"] += 1
                         if healthy:
                             _jobs[job_id]["healthy"] += 1
+                    if _jobs[job_id]["processed"] % 100 == 0 and is_cancelled(job_id):
+                        for f in futures:
+                            f.cancel()
+                        with _jobs_lock:
+                            _jobs[job_id]["status"] = "cancelled"
+                        _record_worker_run("error", "cancelado pelo admin", time.monotonic() - start)
+                        return
 
             now = datetime.now(timezone.utc)
             healthy_count = 0
