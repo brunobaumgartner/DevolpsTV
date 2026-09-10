@@ -22,6 +22,7 @@ CATEGORY_LABELS = {
     "music": "Música",
     "news": "Notícias",
     "outdoor": "Ar livre",
+    "public": "Público",
     "relax": "Relax",
     "religious": "Religioso",
     "science": "Ciência",
