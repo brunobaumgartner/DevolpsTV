@@ -20,6 +20,8 @@ class Channel(Base):
     tvg_id = Column(String(255), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
     logo_url = Column(String(500))
+    backdrop_url = Column(String(600))
+    description = Column(Text)
     category = Column(String(50), index=True)
     is_broadcast_tv = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)

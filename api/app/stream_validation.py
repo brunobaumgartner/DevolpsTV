@@ -85,14 +85,17 @@ def _looks_like_mp4(data: bytes) -> bool:
     return len(data) >= 8 and data[4:8] == b"ftyp"
 
 
-def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | None, bytes] | None:
+def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | None, bytes, str] | None:
     """GET com corpo limitado. None se a request falhar ou o status for erro;
-    senão (Content-Type, corpo bruto)."""
+    senão (Content-Type, corpo bruto, URL FINAL depois de redirects). A URL
+    final importa: encurtadores tipo jmp2.uk fazem 302 pra outro host, e as
+    variantes relativas do m3u8 têm que ser resolvidas contra ela, não contra
+    a original."""
     try:
         with requests.get(url, headers=headers, timeout=timeout, stream=True) as resp:
             if resp.status_code >= 400:
                 return None
-            return resp.headers.get("Content-Type"), _read_bounded(resp)
+            return resp.headers.get("Content-Type"), _read_bounded(resp), str(resp.url)
     except requests.RequestException:
         return None
 
@@ -103,8 +106,7 @@ def _get_manifest_text(url: str, timeout: float, headers: dict | None) -> str | 
     result = _get_body(url, timeout, headers)
     if result is None:
         return None
-    _, data = result
-    return data.decode("utf-8", errors="replace")
+    return result[1].decode("utf-8", errors="replace")
 
 
 def stream_is_really_playable(url: str, timeout: float, headers: dict | None = None) -> bool:
@@ -113,7 +115,7 @@ def stream_is_really_playable(url: str, timeout: float, headers: dict | None = N
     result = _get_body(url, timeout, headers)
     if result is None:
         return False
-    content_type, data = result
+    content_type, data, final_url = result
     text = data.decode("utf-8", errors="replace")
 
     if text.lstrip().startswith("#EXTM3U"):
@@ -122,7 +124,7 @@ def stream_is_really_playable(url: str, timeout: float, headers: dict | None = N
             # já é a media playlist final (tem os segmentos), não master
             return True
 
-        sub_url = urljoin(url, variant)
+        sub_url = urljoin(final_url, variant)  # resolve contra a URL final, não a original
         sub_text = _get_manifest_text(sub_url, timeout, headers)
         return sub_text is not None and sub_text.lstrip().startswith("#EXTM3U")
 

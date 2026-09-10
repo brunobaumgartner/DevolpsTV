@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS channels (
     tvg_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     logo_url VARCHAR(500) NULL,
+    -- imagem de fundo/"capa" (16:9), vem do dataset mjh.nz pros canais FAST
+    backdrop_url VARCHAR(600) NULL,
+    description TEXT NULL,
     category VARCHAR(50) NULL,
     is_broadcast_tv BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,

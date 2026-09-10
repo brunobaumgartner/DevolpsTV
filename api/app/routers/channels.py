@@ -53,6 +53,8 @@ def list_channels(
                 "tvg_id": channel.tvg_id,
                 "name": channel.name,
                 "logo_url": channel.logo_url,
+                "backdrop_url": channel.backdrop_url,
+                "description": channel.description,
                 "category": channel.category,
                 "category_label": category_label(channel.category),
                 "is_broadcast_tv": channel.is_broadcast_tv,

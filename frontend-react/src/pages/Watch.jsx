@@ -68,8 +68,11 @@ function WatchChannel({ tvgId }) {
         {url ? (
           <VideoBox url={url} class="w-full max-w-[1100px] mx-auto aspect-video bg-black" onFatal={() => setStatus("Falha ao reproduzir.")} />
         ) : (
-          <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center text-muted text-sm">
-            {status}
+          <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center text-muted text-sm relative overflow-hidden">
+            {channel.backdrop_url && (
+              <img src={channel.backdrop_url} alt="" class="absolute inset-0 h-full w-full object-cover opacity-30" />
+            )}
+            <span class="relative">{status}</span>
           </div>
         )}
       </div>
@@ -81,6 +84,9 @@ function WatchChannel({ tvgId }) {
           {channel.now_playing ? " · ▶ " + channel.now_playing.title : ""}
         </div>
         <div class="text-xs text-muted mt-1">{status}</div>
+        {channel.description && (
+          <p class="text-sm text-muted mt-3 leading-relaxed max-w-2xl">{channel.description}</p>
+        )}
 
         {langs.length > 1 && (
           <div class="flex items-center gap-1.5 flex-wrap mt-3">

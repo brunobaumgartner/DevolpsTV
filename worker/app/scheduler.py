@@ -3,7 +3,7 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from .config import EPG_FETCH_INTERVAL_MIN, FETCH_CHANNELS_INTERVAL_MIN, HEALTHCHECK_INTERVAL_MIN
-from .jobs import fetch_channels, fetch_epg, healthcheck
+from .jobs import fetch_channels, fetch_epg, fetch_fast_meta, healthcheck
 
 logger = logging.getLogger("iptv-worker.scheduler")
 
@@ -32,9 +32,17 @@ def run_forever():
         id="fetch_epg",
         next_run_time=_now_plus_seconds(45),  # depois do fetch_channels ter os canais no banco
     )
+    scheduler.add_job(
+        fetch_fast_meta.run,
+        "interval",
+        minutes=EPG_FETCH_INTERVAL_MIN,
+        id="fetch_fast_meta",
+        next_run_time=_now_plus_seconds(60),
+    )
 
     logger.info(
-        "Scheduler iniciado. fetch_channels a cada %dmin, healthcheck a cada %dmin, fetch_epg a cada %dmin.",
+        "Scheduler iniciado. fetch_channels a cada %dmin, healthcheck a cada %dmin, "
+        "fetch_epg/fetch_fast_meta a cada %dmin.",
         FETCH_CHANNELS_INTERVAL_MIN,
         HEALTHCHECK_INTERVAL_MIN,
         EPG_FETCH_INTERVAL_MIN,
