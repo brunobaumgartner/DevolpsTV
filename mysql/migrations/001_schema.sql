@@ -118,6 +118,22 @@ CREATE TABLE IF NOT EXISTS access_tokens (
     UNIQUE KEY uniq_token (token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- "Continuar assistindo": posição de reprodução por (token, título)
+CREATE TABLE IF NOT EXISTS watch_progress (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token_id INT NOT NULL,
+    title_id INT NOT NULL,
+    item_id INT NULL,
+    position FLOAT NOT NULL DEFAULT 0,
+    duration FLOAT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_watch_token_title (token_id, title_id),
+    KEY idx_watch_token (token_id, updated_at),
+    CONSTRAINT fk_wp_token FOREIGN KEY (token_id) REFERENCES access_tokens(id) ON DELETE CASCADE,
+    CONSTRAINT fk_wp_title FOREIGN KEY (title_id) REFERENCES vod_titles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_wp_item FOREIGN KEY (item_id) REFERENCES vod_items(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- NOTA (segurança): neste v1 local, api e worker usam o mesmo usuário MySQL
 -- (definido via MYSQL_USER/MYSQL_PASSWORD no .env) para simplificar o setup de teste.
 -- Antes de ir pra VPS/produção, criar usuários separados com privilégio mínimo:

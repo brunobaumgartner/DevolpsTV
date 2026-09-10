@@ -6,17 +6,21 @@ automaticamente, e nenhuma fonte externa é consultada aqui."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
-from ..models import AccessToken, VodItem, VodTitle
+from ..models import AccessToken, VodItem, VodTitle, WatchProgress
 from ..security import require_valid_token
 
 router = APIRouter()
 
 # valor especial no filtro de gênero pra "títulos sem gênero"
 GENRE_NONE = "Outros"
+
+# fração do vídeo a partir da qual consideramos "assistido até o fim"
+FINISH_RATIO = 0.92
 
 
 @router.get("/p/{token}/vod")
@@ -155,14 +159,26 @@ def vod_detail(
         raise HTTPException(status_code=404, detail="Título não encontrado")
 
     items = sorted(t.items, key=lambda i: (i.season_number or 0, i.episode_number or 0))
+    wp = (
+        db.query(WatchProgress)
+        .filter(WatchProgress.token_id == _access.id, WatchProgress.title_id == t.id)
+        .first()
+    )
     return {
         "id": t.id,
         "type": t.type,
         "title": t.title,
         "description": t.description,
         "poster_url": t.poster_url,
+        "backdrop_url": t.backdrop_url,
         "genre": t.genre or GENRE_NONE,
         "year": t.year,
+        "rating": t.rating,
+        "progress": (
+            {"item_id": wp.item_id, "position": wp.position, "duration": wp.duration}
+            if wp
+            else None
+        ),
         "items": [
             {
                 "id": i.id,
@@ -177,3 +193,139 @@ def vod_detail(
             for i in items
         ],
     }
+
+
+# ---------------- "Continuar assistindo" ----------------
+
+
+class ProgressIn(BaseModel):
+    title_id: int
+    item_id: Optional[int] = None
+    position: float
+    duration: Optional[float] = None
+
+
+def _next_episode(db: Session, title_id: int, item_id: Optional[int]) -> Optional[VodItem]:
+    """Próximo episódio disponível (com stream_url) depois do item atual."""
+    if item_id is None:
+        return None
+    cur = db.query(VodItem).filter(VodItem.id == item_id).first()
+    if cur is None:
+        return None
+    key = (cur.season_number or 0, cur.episode_number or 0)
+    eps = (
+        db.query(VodItem)
+        .filter(VodItem.title_id == title_id, VodItem.stream_url.isnot(None))
+        .all()
+    )
+    nxt = sorted(
+        (e for e in eps if (e.season_number or 0, e.episode_number or 0) > key),
+        key=lambda e: (e.season_number or 0, e.episode_number or 0),
+    )
+    return nxt[0] if nxt else None
+
+
+@router.post("/p/{token}/progress")
+def save_progress(
+    token: str,
+    payload: ProgressIn,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Upsert da posição. Se o vídeo foi assistido até o fim (>= FINISH_RATIO):
+    série -> avança pro próximo episódio; filme ou último episódio -> sai da
+    lista."""
+    row = (
+        db.query(WatchProgress)
+        .filter(WatchProgress.token_id == _access.id, WatchProgress.title_id == payload.title_id)
+        .first()
+    )
+    dur = payload.duration or (row.duration if row else None)
+    finished = bool(dur and dur > 0 and payload.position / dur >= FINISH_RATIO)
+
+    if finished:
+        nxt = _next_episode(db, payload.title_id, payload.item_id)
+        if nxt is not None:
+            if row is None:
+                row = WatchProgress(token_id=_access.id, title_id=payload.title_id)
+                db.add(row)
+            row.item_id = nxt.id
+            row.position = 0
+            row.duration = None
+            db.commit()
+            return {"ok": True, "removed": False, "advanced_to": nxt.id}
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return {"ok": True, "removed": True}
+
+    if row is None:
+        row = WatchProgress(token_id=_access.id, title_id=payload.title_id)
+        db.add(row)
+    row.item_id = payload.item_id
+    row.position = max(0.0, payload.position)
+    if payload.duration:
+        row.duration = payload.duration
+    db.commit()
+    return {"ok": True, "removed": False}
+
+
+@router.delete("/p/{token}/progress/{title_id}")
+def remove_progress(
+    token: str,
+    title_id: int,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    db.query(WatchProgress).filter(
+        WatchProgress.token_id == _access.id, WatchProgress.title_id == title_id
+    ).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/p/{token}/continue-watching")
+def continue_watching(
+    token: str,
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    rows = (
+        db.query(WatchProgress)
+        .filter(WatchProgress.token_id == _access.id)
+        .order_by(WatchProgress.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    title_ids = [r.title_id for r in rows]
+    item_ids = [r.item_id for r in rows if r.item_id]
+    titles = {t.id: t for t in db.query(VodTitle).filter(VodTitle.id.in_(title_ids or [0]))}
+    items = {i.id: i for i in db.query(VodItem).filter(VodItem.id.in_(item_ids or [0]))}
+
+    out = []
+    for r in rows:
+        t = titles.get(r.title_id)
+        if t is None:
+            continue
+        it = items.get(r.item_id) if r.item_id else None
+        ep_label = None
+        if it is not None:
+            ep_label = f"T{it.season_number or '?'}E{it.episode_number or '?'}"
+        pct = (r.position / r.duration) if (r.duration and r.duration > 0) else 0
+        out.append(
+            {
+                "title_id": t.id,
+                "type": t.type,
+                "title": t.title,
+                "poster_url": t.poster_url,
+                "backdrop_url": t.backdrop_url,
+                "position": r.position,
+                "duration": r.duration,
+                "pct": round(min(max(pct, 0), 1), 3),
+                "item_id": r.item_id,
+                "episode_label": ep_label,
+                "episode_title": it.episode_title if it else None,
+            }
+        )
+    return {"items": out}

@@ -37,6 +37,21 @@ export const api = {
     ),
   epg: (tvgId) =>
     req(`p/${encodeURIComponent(_token)}/channels/${encodeURIComponent(tvgId)}/epg`),
+
+  // "Continuar assistindo"
+  continueWatching: () => req(`p/${encodeURIComponent(_token)}/continue-watching`),
+  saveProgress: (body) =>
+    fetch(BASE + `p/${encodeURIComponent(_token)}/progress`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true, // sobrevive ao fechar a aba
+      body: JSON.stringify(body),
+    }).catch(() => {}),
+  removeProgress: (titleId) =>
+    fetch(BASE + `p/${encodeURIComponent(_token)}/progress/${titleId}`, {
+      method: "DELETE",
+    }).catch(() => {}),
+
   reportFailure: (tvgId, url) =>
     fetch(
       BASE + `p/${encodeURIComponent(_token)}/channels/${encodeURIComponent(tvgId)}/report-failure`,

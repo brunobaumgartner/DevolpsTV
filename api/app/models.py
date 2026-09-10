@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -120,6 +121,24 @@ class VodItem(Base):
     last_checked_at = Column(DateTime)
 
     vod_title = relationship("VodTitle", back_populates="items")
+
+
+class WatchProgress(Base):
+    """"Continuar assistindo": 1 linha por (token, título). Guarda a posição do
+    filme ou do episódio atual da série. Quando o título/episódio é assistido
+    até o fim, a linha é removida (ou avança pro próximo episódio, se houver)."""
+
+    __tablename__ = "watch_progress"
+
+    id = Column(Integer, primary_key=True)
+    token_id = Column(Integer, ForeignKey("access_tokens.id", ondelete="CASCADE"), nullable=False)
+    title_id = Column(Integer, ForeignKey("vod_titles.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("vod_items.id", ondelete="SET NULL"))  # episódio; NULL p/ filme
+    position = Column(Float, nullable=False, default=0)
+    duration = Column(Float)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("token_id", "title_id", name="uq_watch_token_title"),)
 
 
 class AdminUser(Base):

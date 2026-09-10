@@ -1,3 +1,4 @@
+import { useState, useEffect } from "preact/hooks";
 import { useFetch } from "../lib/useFetch.js";
 import { api } from "../lib/api.js";
 import { navigate } from "../lib/router.jsx";
@@ -10,6 +11,15 @@ const goVod = (t) => navigate(`/assistir/${t.type === "series" ? "serie" : "film
 export function Home() {
   const channels = useFetch("channels", () => api.channels());
   const home = useFetch("vod-home", () => api.vodHome(15)); // 1 request pras fileiras de VOD
+
+  // "Continuar assistindo" — sempre revalida ao voltar pra Home (some quando acaba)
+  const [contItems, setContItems] = useState([]);
+  useEffect(() => {
+    api
+      .continueWatching()
+      .then((r) => setContItems(r.items || []))
+      .catch(() => {});
+  }, []);
 
   const chList = channels.data?.channels || [];
   const liveNow = chList.filter((c) => c.now_playing).slice(0, 20);
@@ -31,6 +41,23 @@ export function Home() {
 
   return (
     <div class="pb-16">
+      {contItems.length > 0 && (
+        <Row
+          title="Continuar assistindo"
+          load={async () => contItems}
+          renderItem={(w) => (
+            <Card
+              kind={w.type}
+              title={w.episode_label ? `${w.title} · ${w.episode_label}` : w.title}
+              image={w.poster_url}
+              progress={w.pct}
+              badge={w.type === "series" ? "série" : "filme"}
+              onClick={() => navigate(`/assistir/${w.type === "series" ? "serie" : "filme"}/${w.title_id}`)}
+            />
+          )}
+        />
+      )}
+
       {liveRow.length > 0 && (
         <Row title="Agora na TV" onSeeAll={() => navigate("/tv")} load={async () => liveRow} renderItem={channelCard} />
       )}

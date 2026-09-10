@@ -154,15 +154,36 @@ function WatchChannel({ tvgId }) {
 // ---------- FILME / SÉRIE ----------
 function WatchVod({ id }) {
   const { data, loading, error } = useFetch(`vod-${id}`, () => api.vodDetail(id));
-  const [current, setCurrent] = useState(null); // {url, label}
+  const [current, setCurrent] = useState(null); // {url, label, itemId}
 
+  // primeiro play: filme -> item[0]; série -> episódio salvo, senão 1º disponível
   useEffect(() => {
-    if (data?.type === "movie" && data.items[0]?.stream_url) {
-      setCurrent({ url: data.items[0].stream_url, label: data.title });
+    if (!data) return;
+    const prog = data.progress;
+    if (data.type === "movie") {
+      const m = data.items[0];
+      if (m?.stream_url) setCurrent({ url: m.stream_url, label: data.title, itemId: m.id });
+      else setCurrent(null);
+      return;
+    }
+    let ep = prog?.item_id && data.items.find((i) => i.id === prog.item_id && i.stream_url);
+    if (!ep) ep = data.items.find((i) => i.stream_url);
+    if (ep) {
+      const lbl = `T${ep.season_number ?? "?"}E${ep.episode_number ?? "?"}`;
+      setCurrent({ url: ep.stream_url, label: `${data.title} — ${lbl}`, itemId: ep.id });
     } else {
       setCurrent(null);
     }
   }, [data?.id]);
+
+  // retoma da posição salva só quando o item atual é o do progresso
+  const startAt =
+    data?.progress && current && data.progress.item_id === current.itemId ? data.progress.position : 0;
+
+  const reportProgress = (position, duration) => {
+    if (!current) return;
+    api.saveProgress({ title_id: id, item_id: current.itemId ?? null, position, duration });
+  };
 
   if (loading) return <div class="p-8 text-muted text-sm">Carregando…</div>;
   if (error) return <div class="p-8 text-danger text-sm">Não foi possível carregar.</div>;
@@ -175,7 +196,12 @@ function WatchVod({ id }) {
 
       <div class="bg-black">
         {current ? (
-          <VideoBox url={current.url} class="w-full max-w-[1100px] mx-auto aspect-video bg-black" />
+          <VideoBox
+            url={current.url}
+            startAt={startAt}
+            onTime={reportProgress}
+            class="w-full max-w-[1100px] mx-auto aspect-video bg-black"
+          />
         ) : (
           <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center">
             {t.poster_url ? (
@@ -204,11 +230,11 @@ function WatchVod({ id }) {
           load={async () => t.items}
           renderItem={(i) => {
             const label = `T${i.season_number ?? "?"}E${i.episode_number ?? "?"}`;
-            const active = current?.url === i.stream_url;
+            const active = current?.itemId === i.id;
             return (
               <button
                 disabled={!i.available}
-                onClick={() => setCurrent({ url: i.stream_url, label: `${t.title} — ${label}` })}
+                onClick={() => setCurrent({ url: i.stream_url, label: `${t.title} — ${label}`, itemId: i.id })}
                 class={
                   "shrink-0 snap-start w-[190px] rounded-md border bg-card p-3 text-left transition-transform disabled:opacity-40 " +
                   (active ? "border-accent" : "border-border hover:border-accent hover:-translate-y-0.5")

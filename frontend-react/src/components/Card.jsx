@@ -3,7 +3,7 @@ import { useState } from "preact/hooks";
 const EMOJI = { movie: "🎬", series: "📺", channel: "📡" };
 
 // pôster (VOD) ou logo de canal. `fill` = ocupa a célula toda (uso em grid)
-export function Card({ kind, title, image, subtitle, badge, onClick, fill }) {
+export function Card({ kind, title, image, subtitle, badge, onClick, fill, progress }) {
   const [broken, setBroken] = useState(false);
   const showImg = image && !broken;
 
@@ -63,6 +63,11 @@ export function Card({ kind, title, image, subtitle, badge, onClick, fill }) {
       <span class="absolute inset-x-0 bottom-0 p-2 pt-6 text-[12px] font-semibold leading-tight bg-gradient-to-t from-bg to-transparent">
         {title}
       </span>
+      {progress > 0 && (
+        <span class="absolute inset-x-0 bottom-0 h-[3px] bg-black/50">
+          <span class="block h-full bg-accent" style={`width:${Math.min(100, progress * 100)}%`} />
+        </span>
+      )}
     </button>
   );
 }
