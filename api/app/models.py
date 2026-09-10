@@ -38,6 +38,12 @@ class Stream(Base):
     referrer = Column(String(500))
     user_agent = Column(String(500))
     quality = Column(String(20))
+    # idioma do stream (vem do feeds.json do iptv-org): "Português",
+    # "Legendado", "Japonês", "Inglês"... NULL = tratado como "Português" no
+    # frontend (canal de país lusófono cujo feed não trouxe idioma). feed_id é
+    # o id do feed no iptv-org, guardado só pra rastrear a origem.
+    feed_id = Column(String(60))
+    lang_label = Column(String(40))
     is_healthy = Column(Boolean, index=True)
     consecutive_failures = Column(Integer, nullable=False, default=0)
     last_checked_at = Column(DateTime)

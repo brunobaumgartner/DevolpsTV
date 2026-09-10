@@ -9,7 +9,11 @@ from ..db import get_db
 from ..epg import now_playing_map, upcoming_programs
 from ..live_check import resolve_live_url
 from ..models import AccessToken, Channel, Stream
-from ..playlist_builder import active_channels_with_all_streams, ranked_stream_urls
+from ..playlist_builder import (
+    active_channels_with_all_streams,
+    ranked_stream_urls,
+    ranked_streams_by_language,
+)
 from ..security import require_valid_token
 
 router = APIRouter()
@@ -36,6 +40,9 @@ def list_channels(
     items = []
     for channel, streams in entries:
         program = now_playing.get(channel.id)
+        # idiomas disponíveis pro canal (Português primeiro). Se só tiver 1, o
+        # frontend nem mostra seletor — comportamento idêntico ao de antes.
+        languages = ranked_streams_by_language(channel)
         items.append(
             {
                 "tvg_id": channel.tvg_id,
@@ -43,9 +50,11 @@ def list_channels(
                 "logo_url": channel.logo_url,
                 "category": channel.category,
                 "is_broadcast_tv": channel.is_broadcast_tv,
-                # stream_url: mantido por compatibilidade (é sempre o 1º de stream_urls)
-                "stream_url": streams[0].url,
-                "stream_urls": [s.url for s in streams],
+                # stream_url / stream_urls: mantidos por compatibilidade — apontam
+                # pro 1º idioma da lista (Português quando existe)
+                "stream_url": languages[0]["stream_urls"][0] if languages else streams[0].url,
+                "stream_urls": languages[0]["stream_urls"] if languages else [s.url for s in streams],
+                "languages": languages,
                 "quality": streams[0].quality,
                 "now_playing": {"title": program.title, "ends_at": program.end_time.isoformat()}
                 if program
@@ -59,24 +68,27 @@ def list_channels(
 def resolve_channel(
     token: str,
     tvg_id: str,
+    lang: Optional[str] = None,
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
     """Verifica AO VIVO (na hora, não pelo cache do health-check) qual mirror do
     canal está respondendo agora, e devolve só esse. Evita mostrar como
-    'disponível' um canal cuja fonte já caiu desde a última checagem periódica."""
+    'disponível' um canal cuja fonte já caiu desde a última checagem periódica.
+    Com `?lang=`, testa só os mirrors daquele idioma."""
     channel = db.query(Channel).filter(Channel.tvg_id == tvg_id, Channel.is_active.is_(True)).first()
     if channel is None:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
 
-    candidates = ranked_stream_urls(channel)
+    candidates = ranked_stream_urls(channel, lang=lang)
     live_url = resolve_live_url(candidates)
     if live_url is None:
+        suffix = f" em {lang}" if lang else ""
         raise HTTPException(
             status_code=503,
-            detail=f"Nenhum dos {len(candidates)} servidor(es) desse canal respondeu agora.",
+            detail=f"Nenhum dos {len(candidates)} servidor(es) desse canal{suffix} respondeu agora.",
         )
-    return {"tvg_id": tvg_id, "url": live_url, "checked_mirrors": len(candidates)}
+    return {"tvg_id": tvg_id, "url": live_url, "checked_mirrors": len(candidates), "lang": lang}
 
 
 @router.get("/p/{token}/channels/{tvg_id}/epg")

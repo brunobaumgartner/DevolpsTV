@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS streams (
     referrer VARCHAR(500) NULL,
     user_agent VARCHAR(500) NULL,
     quality VARCHAR(20) NULL,
+    -- idioma do stream (do feeds.json do iptv-org); NULL = tratado como
+    -- "Português" no frontend. feed_id só rastreia a origem no iptv-org.
+    feed_id VARCHAR(60) NULL,
+    lang_label VARCHAR(40) NULL,
     is_healthy BOOLEAN NULL,
     consecutive_failures INT NOT NULL DEFAULT 0,
     last_checked_at DATETIME NULL,

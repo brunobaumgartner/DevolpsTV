@@ -59,10 +59,35 @@ def active_channels_with_stream(db: Session):
     return result
 
 
-def ranked_stream_urls(channel: Channel, max_mirrors: int = 5) -> list[str]:
+def ranked_stream_urls(channel: Channel, max_mirrors: int = 5, lang: str | None = None) -> list[str]:
     """URLs dos mirrors saudáveis de um canal, do melhor pro pior — usado pra
-    verificação ao vivo na hora que o usuário pede pra assistir."""
-    return [s.url for s in _ranked_streams(channel)[:max_mirrors]]
+    verificação ao vivo na hora que o usuário pede pra assistir. Se `lang` for
+    passado, só os streams daquele idioma (rótulo)."""
+    streams = _ranked_streams(channel)
+    if lang is not None:
+        streams = [s for s in streams if _stream_lang(s) == lang]
+    return [s.url for s in streams[:max_mirrors]]
+
+
+def _stream_lang(stream: Stream) -> str:
+    """Rótulo de idioma do stream; NULL no banco = 'Português' (canal de país
+    lusófono / fonte brasileira sem info de feed)."""
+    return stream.lang_label or "Português"
+
+
+# "Português" primeiro, "Legendado" logo depois, o resto em ordem alfabética
+_LANG_ORDER = {"Português": 0, "Legendado": 1}
+
+
+def ranked_streams_by_language(channel: Channel, max_mirrors: int = 3) -> list[dict]:
+    """Agrupa os mirrors saudáveis do canal por idioma, cada grupo já ordenado
+    do melhor mirror pro pior. Usado pro frontend listar os idiomas disponíveis
+    e o usuário escolher qual tocar."""
+    groups: dict[str, list[str]] = {}
+    for s in _ranked_streams(channel):
+        groups.setdefault(_stream_lang(s), []).append(s.url)
+    ordered = sorted(groups.items(), key=lambda kv: (_LANG_ORDER.get(kv[0], 2), kv[0]))
+    return [{"label": label, "stream_urls": urls[:max_mirrors]} for label, urls in ordered]
 
 
 def active_channels_with_all_streams(db: Session, max_mirrors: int = 3):

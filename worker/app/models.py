@@ -29,6 +29,8 @@ class Stream(Base):
     referrer = Column(String(500))
     user_agent = Column(String(500))
     quality = Column(String(20))
+    feed_id = Column(String(60))
+    lang_label = Column(String(40))
     is_healthy = Column(Boolean, index=True)
     consecutive_failures = Column(Integer, nullable=False, default=0)
     last_checked_at = Column(DateTime)

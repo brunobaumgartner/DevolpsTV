@@ -222,6 +222,14 @@
   .vod-empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
   .vod-pager { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--muted); }
   .vod-pager button:disabled { opacity: .4; cursor: default; }
+  #lang-picker { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #lang-picker .lang-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
+  #lang-picker button {
+    background: var(--card-hover, #0e1c2e); border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  }
+  #lang-picker button:hover { color: var(--accent); border-color: var(--accent); }
+  #lang-picker button.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #041018; border-color: transparent; font-weight: 600; }
   #epg-panel { margin-top: 14px; }
   #epg-panel h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   .epg-item { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -245,6 +253,7 @@
   <section>
     <video id="player" controls autoplay muted></video>
     <div id="status">Nenhum canal carregado ainda.</div>
+    <div id="lang-picker" hidden></div>
     <div id="epg-panel"></div>
   </section>
 
@@ -492,20 +501,60 @@ async function loadEpgPanel(channel) {
   }
 }
 
-async function playChannel(channel, itemEl) {
+const LANG_PREF_KEY = "devolpstv:lang";
+
+function renderLangPicker(channel, activeLabel) {
+  const el = document.getElementById("lang-picker");
+  const langs = channel.languages || [];
+  if (langs.length < 2) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = '<span class="lang-label">Idioma:</span>';
+  langs.forEach((g) => {
+    const btn = document.createElement("button");
+    btn.textContent = g.label;
+    btn.className = g.label === activeLabel ? "active" : "";
+    btn.addEventListener("click", () => {
+      if (g.label === activeLabel) return;
+      try { localStorage.setItem(LANG_PREF_KEY, g.label); } catch {}
+      playChannel(channel, document.querySelector(".channel-item.playing"), g.label);
+    });
+    el.appendChild(btn);
+  });
+}
+
+function pickInitialLang(channel) {
+  const langs = channel.languages || [];
+  if (langs.length < 2) return langs[0] ? langs[0].label : null;
+  let pref = null;
+  try { pref = localStorage.getItem(LANG_PREF_KEY); } catch {}
+  if (pref && langs.some((g) => g.label === pref)) return pref;
+  const pt = langs.find((g) => g.label === "Português");
+  return pt ? pt.label : langs[0].label;
+}
+
+async function playChannel(channel, itemEl, langLabel) {
   document.querySelectorAll(".channel-item.playing").forEach((el) => el.classList.remove("playing"));
-  itemEl.classList.add("playing");
+  if (itemEl) itemEl.classList.add("playing");
   loadEpgPanel(channel);
 
+  const lang = langLabel || pickInitialLang(channel);
+  renderLangPicker(channel, lang);
+
   const myRequestId = ++playRequestId;
-  statusEl.textContent = `Verificando "${channel.name}"...`;
+  statusEl.textContent = `Verificando "${channel.name}"${lang && (channel.languages || []).length > 1 ? " (" + lang + ")" : ""}...`;
 
   // Verificação ao vivo no servidor: o cache do health-check (a cada 15min) não é
   // confiável o suficiente com fontes tão instáveis quanto essas — confirma agora.
   let liveUrl = null;
+  let groupUrls = [];
   try {
+    const qs = lang ? `?lang=${encodeURIComponent(lang)}` : "";
     const resp = await fetch(
-      `p/${encodeURIComponent(currentToken)}/channels/${encodeURIComponent(channel.tvg_id)}/resolve`
+      `p/${encodeURIComponent(currentToken)}/channels/${encodeURIComponent(channel.tvg_id)}/resolve${qs}`
     );
     if (myRequestId !== playRequestId) return; // usuário já clicou em outro canal enquanto isso
 
@@ -522,9 +571,10 @@ async function playChannel(channel, itemEl) {
     return;
   }
 
-  // além do mirror já confirmado ao vivo, mantém os outros conhecidos como
-  // reserva (defesa extra caso ele caia nos segundos entre a checagem e o play)
-  const fallbacks = (channel.stream_urls || []).filter((u) => u !== liveUrl);
+  // fallbacks: os outros mirrors do MESMO idioma escolhido
+  const group = (channel.languages || []).find((g) => g.label === lang);
+  groupUrls = group ? group.stream_urls : channel.stream_urls || [];
+  const fallbacks = groupUrls.filter((u) => u !== liveUrl);
   tryMirror(channel, [liveUrl, ...fallbacks], 0);
 }
 

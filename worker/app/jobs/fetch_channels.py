@@ -47,10 +47,22 @@ def run():
 
                     existing_stream = next((s for s in channel.streams if s.url == entry.url), None)
                     if existing_stream is None:
-                        new_stream = Stream(channel_id=channel.id, url=entry.url)
+                        new_stream = Stream(
+                            channel_id=channel.id,
+                            url=entry.url,
+                            feed_id=entry.feed_id,
+                            lang_label=entry.lang_label,
+                        )
                         db.add(new_stream)
                         channel.streams.append(new_stream)
                         new_streams += 1
+                    else:
+                        # idioma/feed são dado do worker — atualiza se a fonte
+                        # trouxe (o iptv-org reclassifica feeds de vez em quando)
+                        if entry.lang_label and existing_stream.lang_label != entry.lang_label:
+                            existing_stream.lang_label = entry.lang_label
+                        if entry.feed_id and existing_stream.feed_id != entry.feed_id:
+                            existing_stream.feed_id = entry.feed_id
 
                 db.commit()  # commita por fonte: se uma fonte falhar, não perde as anteriores
                 logger.info("[%s] +%d canal(is) novo(s), +%d stream(s) novo(s)", source_name, new_channels, new_streams)

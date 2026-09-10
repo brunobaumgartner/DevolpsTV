@@ -80,6 +80,8 @@ class ChannelEntry:
     category: Optional[str]
     url: str
     source: str
+    feed_id: Optional[str] = None
+    lang_label: Optional[str] = None
 
 
 def _fetch_json(url: str):
@@ -168,53 +170,83 @@ def _build_logo_map(channel_ids: set) -> dict:
 
 _LUSOPHONE_BROADCAST_AREAS = {f"c/{code}" for code in LUSOPHONE_COUNTRY_CODES}
 
+# iso 639-3 -> nome curto pra rótulo de idioma no player. Só os que aparecem
+# de verdade nos feeds que a gente puxa; o resto cai no fallback.
+_LANG_NAMES = {
+    "por": "Português", "eng": "Inglês", "spa": "Espanhol", "jpn": "Japonês",
+    "jap": "Japonês", "fra": "Francês", "fre": "Francês", "deu": "Alemão",
+    "ger": "Alemão", "ita": "Italiano", "kor": "Coreano", "zho": "Chinês",
+    "cmn": "Chinês", "rus": "Russo",
+}
 
-def _portuguese_feed_keys() -> set:
-    """(channel_id, feed_id) de todo feed lusófono no iptv-org — inclui feeds
-    de redes que registram o canal em outro país (Pluto TV, Samsung TV Plus,
-    Plex...). Dois critérios:
-      - `languages` tem "por" (áudio em português), OU
-      - `broadcast_area` é um país lusófono (ex: feed "BR" do One Piece, que
-        tem áudio japonês mas é legendado e transmitido pro Brasil).
-    Vazio se feeds.json falhar (aí só o filtro por país do canal vale,
-    comportamento antigo)."""
+
+def _feed_label(feed: dict) -> str:
+    """Rótulo de idioma pro player, a partir de 1 feed do iptv-org."""
+    langs = feed.get("languages") or []
+    areas = feed.get("broadcast_area") or []
+    if PORTUGUESE_LANG_CODE in langs:
+        return "Português"
+    if any(a in _LUSOPHONE_BROADCAST_AREAS for a in areas):
+        # transmitido pra país lusófono mas áudio não é português — é o feed
+        # legendado (ex: feed "BR" do One Piece, áudio japonês + legenda PT)
+        return "Legendado"
+    if langs:
+        return _LANG_NAMES.get(langs[0], langs[0].upper())
+    return "Outro idioma"
+
+
+def _iptv_org_feeds():
+    """feeds.json inteiro, ou [] se falhar (aí cai só no filtro por país)."""
     try:
-        feeds = _fetch_json(IPTV_ORG_FEEDS_URL)
+        return _fetch_json(IPTV_ORG_FEEDS_URL)
     except requests.RequestException:
         logger.warning("[iptv-org] falha ao buscar feeds.json, seguindo só com filtro por país", exc_info=True)
-        return set()
-    keys = set()
-    for f in feeds:
-        if not f.get("channel") or not f.get("id"):
-            continue
-        langs = f.get("languages") or []
-        areas = f.get("broadcast_area") or []
-        if PORTUGUESE_LANG_CODE in langs or any(a in _LUSOPHONE_BROADCAST_AREAS for a in areas):
-            keys.add((f["channel"], f["id"]))
-    return keys
+        return []
 
 
 def load_iptv_org() -> Iterable[ChannelEntry]:
     channels_data = _fetch_json(IPTV_ORG_CHANNELS_URL)
     by_id = {c["id"]: c for c in channels_data}
 
-    pt_feed_keys = _portuguese_feed_keys()
-    pt_feed_channel_ids = {ch for ch, _feed in pt_feed_keys}
-
     def _usable(info) -> bool:
         return bool(info) and not info.get("closed") and not info.get("is_nsfw")
 
-    # país de língua oficial portuguesa OU canal que tem pelo menos 1 feed em português
-    wanted_ids = {
+    feeds = _iptv_org_feeds()
+    feeds_by_channel: dict[str, list[dict]] = {}
+    for f in feeds:
+        if f.get("channel") and f.get("id"):
+            feeds_by_channel.setdefault(f["channel"], []).append(f)
+
+    def _has_lusophone_feed(cid: str) -> bool:
+        for f in feeds_by_channel.get(cid, []):
+            langs = f.get("languages") or []
+            areas = f.get("broadcast_area") or []
+            if PORTUGUESE_LANG_CODE in langs or any(a in _LUSOPHONE_BROADCAST_AREAS for a in areas):
+                return True
+        return False
+
+    # canal entra se: país de língua oficial portuguesa OU tem ao menos 1 feed
+    # lusófono (áudio PT ou transmitido pra país lusófono/legendado)
+    lusophone_country_ids = {
         cid for cid, info in by_id.items()
-        if _usable(info) and (info.get("country") in LUSOPHONE_COUNTRY_CODES or cid in pt_feed_channel_ids)
+        if _usable(info) and info.get("country") in LUSOPHONE_COUNTRY_CODES
     }
-    country_only = sum(
-        1 for cid in wanted_ids if by_id[cid].get("country") in LUSOPHONE_COUNTRY_CODES
-    )
+    wanted_ids = set(lusophone_country_ids) | {
+        cid for cid, info in by_id.items() if _usable(info) and _has_lusophone_feed(cid)
+    }
+
+    # rótulo de idioma por (channel, feed) — pra TODO feed de um canal que
+    # entrou, não só o lusófono: assim o player lista "Português / Japonês /
+    # ..." e o usuário escolhe. Feed sem entrada em feeds.json (feed_id None
+    # nos streams) → rótulo fica None e o frontend assume "Português".
+    feed_label: dict[tuple, str] = {}
+    for cid in wanted_ids:
+        for f in feeds_by_channel.get(cid, []):
+            feed_label[(cid, f["id"])] = _feed_label(f)
+
     logger.info(
-        "[iptv-org] canais em português: %d (%d por país lusófono + %d por feed em português)",
-        len(wanted_ids), country_only, len(wanted_ids) - country_only,
+        "[iptv-org] canais em português: %d (%d por país lusófono + %d por feed)",
+        len(wanted_ids), len(lusophone_country_ids), len(wanted_ids) - len(lusophone_country_ids),
     )
 
     logo_map = _build_logo_map(wanted_ids)
@@ -229,29 +261,34 @@ def load_iptv_org() -> Iterable[ChannelEntry]:
         }
 
     streams_data = _fetch_json(IPTV_ORG_STREAMS_URL)
-    pt_streams = [
-        s for s in streams_data
-        if _is_playable_url(s.get("url"))
-        and (
-            # canal de país lusófono: qualquer feed serve
-            (s.get("channel") in wanted_ids and by_id.get(s.get("channel"), {}).get("country") in LUSOPHONE_COUNTRY_CODES)
-            # canal de outro país: só o(s) feed(s) marcado(s) como português
-            or (s.get("channel"), s.get("feed")) in pt_feed_keys
-        )
-    ]
-    logger.info("[iptv-org] streams em português: %d", len(pt_streams))
+    kept = 0
+    for s in streams_data:
+        cid = s.get("channel")
+        if cid not in wanted_ids or not _is_playable_url(s.get("url")):
+            continue
+        fid = s.get("feed")
+        label = feed_label.get((cid, fid))
+        # canal de país lusófono sem info de feed → assume português
+        if label is None and cid in lusophone_country_ids:
+            label = "Português"
+        # canal que entrou só por feed lusófono: descarta stream de feed que
+        # não sabemos o idioma (evita servir um feed aleatório sem rótulo)
+        if label is None:
+            continue
 
-    for s in pt_streams:
-        tvg_id = s["channel"]
-        meta = channel_meta.get(tvg_id, {})
+        kept += 1
+        meta = channel_meta.get(cid, {})
         yield ChannelEntry(
-            tvg_id=tvg_id,
-            name=meta.get("name", tvg_id),
+            tvg_id=cid,
+            name=meta.get("name", cid),
             logo_url=meta.get("logo_url"),
             category=meta.get("category"),
             url=s["url"],
             source="iptv-org",
+            feed_id=fid,
+            lang_label=label,
         )
+    logger.info("[iptv-org] streams em português: %d", kept)
 
 
 def load_iptvcom() -> Iterable[ChannelEntry]:
