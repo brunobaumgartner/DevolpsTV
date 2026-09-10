@@ -49,14 +49,57 @@ export const api = {
 };
 
 // --- admin (sessão por cookie) ---
+const jpost = (path, body) =>
+  req(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+const jpatch = (path, body) =>
+  req(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+const jdel = (path) => req(path, { method: "DELETE" });
+
 export const adminApi = {
   me: () => req("admin/me"),
   tokens: () => req("admin/tokens"),
-  login: (username, password) =>
-    req("admin/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    }),
+  login: (username, password) => jpost("admin/login", { username, password }),
   logout: () => fetch(BASE + "admin/logout", { method: "POST", credentials: "include" }).catch(() => {}),
+
+  dashboard: () => req("admin/dashboard"),
+  streams: (healthy) => req(`admin/streams${healthy == null ? "" : "?healthy=" + healthy}`),
+
+  // jobs (todos: POST inicia -> {job_id}; GET status)
+  startClassifyImdb: () => jpost("admin/vod/classify-genres-imdb"),
+  classifyImdbStatus: (id) => req(`admin/vod/classify-genres-imdb/${id}/status`),
+  startHealthcheck: () => jpost("admin/healthcheck"),
+  healthcheckStatus: (id) => req(`admin/healthcheck/${id}/status`),
+  startClassifyChannels: () => jpost("admin/channels/classify-categories"),
+  classifyChannelsStatus: (id) => req(`admin/channels/classify-categories/${id}/status`),
+
+  // gêneros manuais
+  titlesWithoutGenre: (type, limit, offset) =>
+    req(`admin/vod/titles-without-genre?type=${type}&limit=${limit}&offset=${offset}`),
+  setTitleGenre: (id, genre) => jpatch(`admin/vod/titles/${id}/genre`, { genre }),
+
+  // genre-keywords
+  genreKeywords: () => req("admin/genre-keywords"),
+  addGenreKeyword: (genre, keyword) => jpost("admin/genre-keywords", { genre, keyword }),
+  delGenreKeyword: (id) => jdel(`admin/genre-keywords/${id}`),
+  delGenre: (genre) => jdel(`admin/genre-keywords/genre/${encodeURIComponent(genre)}`),
+
+  // catálogo / cadastro
+  vodList: () => req("admin/vod"),
+  addMovie: (b) => jpost("admin/vod/movie", b),
+  addSeries: (b) => jpost("admin/vod/series", b),
+  addEpisode: (titleId, b) => jpost(`admin/vod/${titleId}/episodes`, b),
+  updateItem: (id, b) => jpatch(`admin/vod/items/${id}`, b),
+  delTitle: (id) => jdel(`admin/vod/titles/${id}`),
+  delItem: (id) => jdel(`admin/vod/items/${id}`),
+  addChannel: (b) => jpost("admin/channels", b),
+  importCsvStatus: (id) => req(`admin/vod/import-csv/${id}/status`),
+  importCsv: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(BASE + "admin/vod/import-csv", { method: "POST", credentials: "include", body: fd }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+      return j;
+    });
+  },
 };

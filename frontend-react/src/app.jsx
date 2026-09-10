@@ -2,11 +2,14 @@ import { useSession } from "./lib/session.js";
 import { Switch, Route } from "./lib/router.jsx";
 import { Header } from "./components/Header.jsx";
 import { TokenGate } from "./components/TokenGate.jsx";
+import { lazy } from "./lib/lazy.jsx";
 import { Home } from "./pages/Home.jsx";
 import { Watch } from "./pages/Watch.jsx";
 import { VodList } from "./pages/VodList.jsx";
 import { LiveTV } from "./pages/LiveTV.jsx";
 import { Stub } from "./pages/Stub.jsx";
+
+const AdminApp = lazy(() => import("./pages/admin/AdminApp.jsx"), "AdminApp");
 
 export function App() {
   const session = useSession();
@@ -30,7 +33,7 @@ export function App() {
           <Route path="/series" render={() => <VodList mode="series" />} />
           <Route path="/animes" render={() => <VodList mode="anime" />} />
           <Route path="/genero/:nome" render={({ params }) => <VodList mode="genre" params={params} />} />
-          <Route path="/admin/*" component={Stub} />
+          <Route path="/admin/*" component={AdminApp} />
         </Switch>
       </main>
     </>
