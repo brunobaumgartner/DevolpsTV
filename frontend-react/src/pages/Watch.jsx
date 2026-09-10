@@ -24,9 +24,14 @@ function BackBar({ children }) {
 }
 
 // ---------- CANAL AO VIVO ----------
+function fmtHour(iso) {
+  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function WatchChannel({ tvgId }) {
   const { data } = useFetch("channels", () => api.channels());
   const channel = (data?.channels || []).find((c) => c.tvg_id === tvgId);
+  const epg = useFetch(channel ? `epg-${tvgId}` : null, () => api.epg(tvgId), { enabled: !!channel });
 
   const [lang, setLang] = useState(null);
   const [url, setUrl] = useState(null);
@@ -99,6 +104,31 @@ function WatchChannel({ tvgId }) {
           </div>
         )}
       </div>
+
+      {epg.data?.has_epg && (
+        <Row
+          title="Programação"
+          load={async () => epg.data.programs.slice(0, 24)}
+          renderItem={(p) => {
+            const now = Date.now();
+            const live = new Date(p.starts_at) <= now && new Date(p.ends_at) > now;
+            return (
+              <div
+                class={
+                  "shrink-0 snap-start w-[170px] rounded-md border bg-card p-2.5 " +
+                  (live ? "border-accent" : "border-border")
+                }
+              >
+                <div class={"text-[11px] " + (live ? "text-accent" : "text-muted")}>
+                  {live ? "AGORA · " : ""}
+                  {fmtHour(p.starts_at)}
+                </div>
+                <div class="text-[13px] mt-1 line-clamp-2 min-h-[2.4em]">{p.title}</div>
+              </div>
+            );
+          }}
+        />
+      )}
 
       {sameCat.length > 0 && (
         <Row

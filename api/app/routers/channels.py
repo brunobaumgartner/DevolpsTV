@@ -122,8 +122,10 @@ def channel_epg(
                 "title": p.title,
                 "subtitle": p.subtitle,
                 "description": p.description,
-                "starts_at": p.start_time.isoformat(),
-                "ends_at": p.end_time.isoformat(),
+                # gravados UTC-naive no banco — "Z" explícito pro navegador
+                # não interpretar como horário local
+                "starts_at": p.start_time.isoformat() + "Z",
+                "ends_at": p.end_time.isoformat() + "Z",
             }
             for p in programs
         ],

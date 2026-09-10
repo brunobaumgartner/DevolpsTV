@@ -79,7 +79,15 @@ def start_healthcheck_job() -> str:
         db = SessionLocal()
         try:
             streams = db.query(Stream).all()
-            vod_items = db.query(VodItem).filter(VodItem.stream_url.isnot(None)).all()
+            # cap: o catálogo VOD tem centenas de milhares de itens; testa um
+            # lote dos mais desatualizados (o botão pode ser clicado de novo)
+            vod_items = (
+                db.query(VodItem)
+                .filter(VodItem.stream_url.isnot(None))
+                .order_by(VodItem.last_checked_at.is_(None).desc(), VodItem.last_checked_at.asc())
+                .limit(8000)
+                .all()
+            )
             total = len(streams) + len(vod_items)
             with _jobs_lock:
                 _jobs[job_id]["total"] = total

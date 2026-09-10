@@ -1,6 +1,8 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import or_
 
 from ..config import HEALTHCHECK_MAX_WORKERS, HEALTHCHECK_TIMEOUT_SEC
 from ..db import SessionLocal
@@ -9,6 +11,13 @@ from ..models import Stream, VodItem
 from ..stream_validation import stream_is_really_playable
 
 logger = logging.getLogger("iptv-worker.healthcheck")
+
+# o catálogo VOD tem centenas de milhares de itens — testar todos a cada
+# ciclo levaria horas. Cada rodada pega só um LOTE dos mais desatualizados
+# (nunca checados ou checados há +VOD_STALE_HOURS). Assim o catálogo inteiro
+# roda em ~1 dia sem cada ciclo estourar o tempo.
+VOD_BATCH = 4000
+VOD_STALE_HOURS = 18
 
 
 def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, bool]:
@@ -27,9 +36,16 @@ def run():
     db = SessionLocal()
     try:
         streams = db.query(Stream).all()
-        # VOD (filmes/séries) usa link direto (.mp4/.ts, sem referrer/user-agent
-        # customizado) — testado junto aqui pra dar 1 visão só de saude de link
-        vod_items = db.query(VodItem).filter(VodItem.stream_url.isnot(None)).all()
+        # VOD: só um lote rotativo dos mais desatualizados por ciclo
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=VOD_STALE_HOURS)
+        vod_items = (
+            db.query(VodItem)
+            .filter(VodItem.stream_url.isnot(None))
+            .filter(or_(VodItem.last_checked_at.is_(None), VodItem.last_checked_at < cutoff))
+            .order_by(VodItem.last_checked_at.is_(None).desc(), VodItem.last_checked_at.asc())
+            .limit(VOD_BATCH)
+            .all()
+        )
 
         if not streams and not vod_items:
             logger.info("Nenhum link cadastrado ainda, pulando health-check.")
