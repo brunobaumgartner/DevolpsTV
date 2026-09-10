@@ -132,6 +132,13 @@ def start_imdb_classify_job() -> str:
                     title.genre = genre
                     keyword_classified += 1
 
+            # refino Animação -> Anime: título já marcado "Animação" que tem
+            # sinal claro de anime japonês no nome vira "Anime"
+            for title in titles:
+                if title.genre == "Animação" and classify_title(title.title, patterns) == "Anime":
+                    title.genre = "Anime"
+                    corrected += 1
+
             db.commit()
             _set_progress(
                 job_id,

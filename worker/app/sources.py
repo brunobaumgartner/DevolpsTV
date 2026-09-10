@@ -176,7 +176,13 @@ _LANG_NAMES = {
     "por": "Português", "eng": "Inglês", "spa": "Espanhol", "jpn": "Japonês",
     "jap": "Japonês", "fra": "Francês", "fre": "Francês", "deu": "Alemão",
     "ger": "Alemão", "ita": "Italiano", "kor": "Coreano", "zho": "Chinês",
-    "cmn": "Chinês", "rus": "Russo",
+    "cmn": "Chinês", "rus": "Russo", "bul": "Búlgaro", "tam": "Tâmil",
+    "pol": "Polonês", "tur": "Turco", "nep": "Nepali", "heb": "Hebraico",
+    "ces": "Tcheco", "cze": "Tcheco", "ara": "Árabe", "hin": "Híndi",
+    "nld": "Holandês", "dut": "Holandês", "swe": "Sueco", "nor": "Norueguês",
+    "dan": "Dinamarquês", "fin": "Finlandês", "ell": "Grego", "gre": "Grego",
+    "ron": "Romeno", "rum": "Romeno", "hun": "Húngaro", "ukr": "Ucraniano",
+    "vie": "Vietnamita", "tha": "Tailandês", "ind": "Indonésio",
 }
 
 

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .auth_admin import hash_password
 from .config import ADMIN_PASSWORD, ADMIN_USERNAME, FRONTEND_DIR
 from .db import Base, SessionLocal, engine
-from .genre_classifier import seed_default_keywords_if_empty
+from .genre_classifier import seed_default_keywords_if_empty, sync_new_default_keywords
 from .models import AccessToken, AdminUser
 from .routers import admin, channels, health, playlist, vod
 
@@ -105,6 +105,9 @@ def _ensure_genre_keywords():
         added = seed_default_keywords_if_empty(db)
         if added:
             logger.info("Semeadas %d palavras-chave de gênero padrão.", added)
+        synced = sync_new_default_keywords(db)
+        if synced:
+            logger.info("Adicionadas %d palavras-chave novas de gênero padrão.", synced)
     finally:
         db.close()
 

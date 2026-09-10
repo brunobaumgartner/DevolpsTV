@@ -33,9 +33,22 @@ DEFAULT_KEYWORDS: dict[str, list[str]] = {
         "biography", "biopic", "based on true story", "based on real events", "life story of",
         "biografia", "baseado em fatos reais", "história de vida", "a vida real de",
     ],
+    # Anime vem ANTES de Animação na ordem de prioridade — quando o título tem
+    # sinal claro de anime japonês, ganha "Anime"; senão cai em "Animação"
+    "Anime": [
+        "anime", "mangá", "manga", "otaku", "shounen", "shonen", "shoujo", "shojo",
+        "seinen", "isekai", "mecha", "studio ghibli", "toei animation", "crunchyroll",
+        "naruto", "one piece", "dragon ball", "bleach", "boruto", "demon slayer",
+        "kimetsu", "jujutsu kaisen", "attack on titan", "shingeki", "pokémon", "pokemon",
+        "digimon", "yu-gi-oh", "sailor moon", "cavaleiros do zodíaco", "saint seiya",
+        "hunter x hunter", "my hero academia", "boku no hero", "death note",
+        "fullmetal alchemist", "evangelion", "gundam", "one punch man", "chainsaw man",
+        "spy x family", "tokyo revengers", "haikyuu", "black clover", "fairy tail",
+        "dublado anime", "anime legendado",
+    ],
     "Animação": [
-        "animation", "animated", "anime", "cartoon", "manga", "pixar", "dreamworks", "illumination",
-        "studio ghibli", "stop motion", "claymation", "desenho animado", "animação", "desenhos", "infantil animado", "longa animado",
+        "animation", "animated", "cartoon", "pixar", "dreamworks", "illumination",
+        "stop motion", "claymation", "desenho animado", "animação", "desenhos", "infantil animado", "longa animado",
     ],
     "Musical": [
         "musical", "singer", "singing", "concert", "musician", "song and dance", "broadway", "rock band",
@@ -163,9 +176,32 @@ def seed_default_keywords_if_empty(db) -> int:
     return count
 
 
+def sync_new_default_keywords(db) -> int:
+    """Insere pares (gênero, palavra) do DEFAULT_KEYWORDS que ainda não existem
+    na tabela — pra quando a gente adiciona um gênero novo no código (ex:
+    "Anime") sem querer re-semear tudo nem apagar o que o usuário editou.
+    Idempotente. Não roda se a tabela estiver vazia (aí o seed cuida)."""
+    existing = {
+        (g, k)
+        for g, k in db.query(GenreKeyword.genre, GenreKeyword.keyword).all()
+    }
+    if not existing:
+        return 0
+    added = 0
+    for genre, keywords in DEFAULT_KEYWORDS.items():
+        for kw in keywords:
+            if (genre, kw) not in existing:
+                db.add(GenreKeyword(genre=genre, keyword=kw))
+                added += 1
+    if added:
+        db.commit()
+    return added
+
+
 def _load_ordered_patterns(db) -> list[tuple[str, re.Pattern]]:
-    """Devolve [(genre, pattern), ...] na ordem de prioridade (id mais antigo
-    do gênero primeiro)."""
+    """Devolve [(genre, pattern), ...] na ordem de prioridade: a ordem do
+    DEFAULT_KEYWORDS (mais específico primeiro) manda pros gêneros conhecidos;
+    gêneros criados só pelo usuário vêm depois, na ordem do id mais antigo."""
     rows = db.query(GenreKeyword).order_by(GenreKeyword.id).all()
     by_genre: dict[str, list[str]] = {}
     first_id: dict[str, int] = {}
@@ -173,7 +209,12 @@ def _load_ordered_patterns(db) -> list[tuple[str, re.Pattern]]:
         by_genre.setdefault(row.genre, []).append(row.keyword)
         first_id.setdefault(row.genre, row.id)
 
-    ordered_genres = sorted(by_genre.keys(), key=lambda g: first_id[g])
+    default_order = {g: i for i, g in enumerate(DEFAULT_KEYWORDS)}
+    big = len(default_order)
+    ordered_genres = sorted(
+        by_genre.keys(),
+        key=lambda g: (default_order.get(g, big), first_id[g]),
+    )
     patterns = []
     for genre in ordered_genres:
         escaped = sorted({re.escape(_normalize(kw)) for kw in by_genre[genre] if kw.strip()}, key=len, reverse=True)

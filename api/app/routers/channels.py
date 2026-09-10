@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..categories_pt import category_label
 from ..epg import now_playing_map, upcoming_programs
 from ..live_check import resolve_live_url
 from ..models import AccessToken, Channel, Stream
@@ -49,6 +50,7 @@ def list_channels(
                 "name": channel.name,
                 "logo_url": channel.logo_url,
                 "category": channel.category,
+                "category_label": category_label(channel.category),
                 "is_broadcast_tv": channel.is_broadcast_tv,
                 # stream_url / stream_urls: mantidos por compatibilidade — apontam
                 # pro 1º idioma da lista (Português quando existe)

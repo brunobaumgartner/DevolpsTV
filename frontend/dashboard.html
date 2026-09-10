@@ -286,6 +286,19 @@ function renderDashboard(stats) {
   const moviesGenreBars = genreBarsHtml(stats.vod.movies_by_genre || [], "movie");
   const seriesGenreBars = genreBarsHtml(stats.vod.series_by_genre || [], "series");
 
+  const langRows = stats.streams.by_language || [];
+  const maxLangCount = Math.max(1, ...langRows.map((r) => r.count));
+  const languageBars = langRows
+    .map(
+      (r) => `
+      <div class="bar-row">
+        <div class="bar-label">${escapeHtml(r.language)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(r.count / maxLangCount) * 100}%"></div></div>
+        <div class="bar-count">${r.count}</div>
+      </div>`
+    )
+    .join("");
+
   const jobRows = Object.keys(JOB_LABELS)
     .map((jobName) => {
       const job = stats.worker_jobs.find((j) => j.job_name === jobName);
@@ -384,6 +397,11 @@ function renderDashboard(stats) {
         <thead><tr><th>Job</th><th>Status</th><th>Última execução</th><th>Resumo</th></tr></thead>
         <tbody>${jobRows}</tbody>
       </table>
+    </section>
+
+    <section class="panel">
+      <h2>Streams por idioma</h2>
+      ${languageBars || '<div class="loading">Sem dados.</div>'}
     </section>
 
     <section class="panel">

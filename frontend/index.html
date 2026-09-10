@@ -264,6 +264,9 @@
     </div>
 
     <div id="live-panel">
+      <div class="vod-controls">
+        <input type="text" id="live-search" placeholder="Buscar canal..." />
+      </div>
       <div class="categories" id="categories"></div>
       <div class="channel-list" id="channel-list"></div>
     </div>
@@ -272,11 +275,11 @@
       <div class="vod-controls">
         <input type="text" id="vod-search" placeholder="Buscar por título..." />
         <div class="vod-type-tabs" id="vod-type-tabs">
-          <button class="active" data-type="">Todos</button>
-          <button data-type="movie">Filmes</button>
+          <button class="active" data-type="movie">Filmes</button>
           <button data-type="series">Séries</button>
+          <button data-type="anime">Animes</button>
         </div>
-        <select id="vod-genre"><option value="">Todos os gêneros</option></select>
+        <select id="vod-genre"><option value="">Gênero…</option></select>
       </div>
       <div class="vod-count" id="vod-count"></div>
       <div id="vod-grid" class="vod-grid"></div>
@@ -294,6 +297,7 @@ const tokenInput = document.getElementById("token");
 const loadBtn = document.getElementById("load-btn");
 const statusEl = document.getElementById("status");
 const listEl = document.getElementById("channel-list");
+document.getElementById("live-search").addEventListener("input", () => renderList());
 const categoriesEl = document.getElementById("categories");
 const video = document.getElementById("player");
 const tabLiveBtn = document.getElementById("tab-live");
@@ -409,7 +413,9 @@ async function loadChannels(tokenOverride) {
       return;
     }
     const data = await resp.json();
-    allChannels = data.channels || [];
+    allChannels = (data.channels || []).sort((a, b) =>
+      (a.name || "").localeCompare(b.name || "", "pt", { sensitivity: "base" })
+    );
     statusEl.textContent = `${allChannels.length} canais ativos.`;
     renderCategories();
     renderList();
@@ -419,12 +425,25 @@ async function loadChannels(tokenOverride) {
   }
 }
 
+// slug de categoria -> rótulo em português. Canal sem categoria vira "outros".
+function catSlug(ch) {
+  return ch.category || "outros";
+}
+function catLabel(ch) {
+  return ch.category_label || (ch.category ? ch.category : "Outros");
+}
+
 function renderCategories() {
-  const cats = Array.from(new Set(allChannels.map((c) => c.category || "outros"))).sort();
+  // { slug: label } de todas as categorias que aparecem, "outros" incluído
+  const bySlug = new Map();
+  allChannels.forEach((c) => bySlug.set(catSlug(c), catLabel(c)));
+  const entries = [...bySlug.entries()].sort((a, b) =>
+    a[1].localeCompare(b[1], "pt", { sensitivity: "base" })
+  );
+
   categoriesEl.innerHTML = "";
-  const allBtn = makeCategoryButton("Todos", null);
-  categoriesEl.appendChild(allBtn);
-  cats.forEach((cat) => categoriesEl.appendChild(makeCategoryButton(cat, cat)));
+  // sem botão "Todos": clicar de novo na categoria ativa volta a mostrar tudo
+  entries.forEach(([slug, label]) => categoriesEl.appendChild(makeCategoryButton(label, slug)));
 }
 
 function makeCategoryButton(label, value) {
@@ -432,7 +451,7 @@ function makeCategoryButton(label, value) {
   btn.className = "cat-btn" + (activeCategory === value ? " active" : "");
   btn.textContent = label;
   btn.addEventListener("click", () => {
-    activeCategory = value;
+    activeCategory = activeCategory === value ? null : value; // toggle
     renderCategories();
     renderList();
   });
@@ -445,10 +464,17 @@ function escapeHtml(value) {
   return div.innerHTML;
 }
 
+function normalizeText(s) {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
 function renderList() {
-  const filtered = activeCategory
-    ? allChannels.filter((c) => (c.category || "outros") === activeCategory)
-    : allChannels;
+  const q = normalizeText(document.getElementById("live-search").value.trim());
+  const filtered = allChannels.filter((c) => {
+    if (activeCategory && (c.category || "outros") !== activeCategory) return false;
+    if (q && !normalizeText(c.name).includes(q)) return false;
+    return true;
+  });
 
   listEl.innerHTML = "";
   filtered.forEach((ch) => {
@@ -643,11 +669,13 @@ function playUrl(url, onFatalError) {
 
 // --- Filmes e Séries (catálogo VOD) ---
 
-let currentVodTitles = [];
-let vodActiveType = ""; // "" | "movie" | "series"
+// paginação e filtros agora são no SERVIDOR (o catálogo tem dezenas de milhares
+// de títulos — baixar tudo de uma vez era o que deixava lento)
+let vodActiveType = "movie"; // "movie" | "series" | "anime"
 let vodActiveGenre = "";
 let vodSearchTerm = "";
 let vodPage = 0;
+let vodTotal = 0;
 const VOD_PAGE_SIZE = 60;
 
 const vodSearchEl = document.getElementById("vod-search");
@@ -662,10 +690,10 @@ let vodSearchDebounce = null;
 vodSearchEl.addEventListener("input", () => {
   clearTimeout(vodSearchDebounce);
   vodSearchDebounce = setTimeout(() => {
-    vodSearchTerm = vodSearchEl.value.trim().toLowerCase();
+    vodSearchTerm = vodSearchEl.value.trim();
     vodPage = 0;
-    renderVodGrid();
-  }, 200);
+    fetchVodPage();
+  }, 250);
 });
 
 vodTypeTabsEl.querySelectorAll("button").forEach((btn) => {
@@ -673,90 +701,86 @@ vodTypeTabsEl.querySelectorAll("button").forEach((btn) => {
     vodTypeTabsEl.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     vodActiveType = btn.dataset.type;
+    // "Animes" já é um recorte de gênero — o seletor de gênero não se aplica
+    vodGenreEl.disabled = vodActiveType === "anime";
     vodPage = 0;
-    renderVodGrid();
+    fetchVodPage();
   });
 });
 
 vodGenreEl.addEventListener("change", () => {
   vodActiveGenre = vodGenreEl.value;
   vodPage = 0;
-  renderVodGrid();
+  fetchVodPage();
 });
 
 vodPrevBtn.addEventListener("click", () => {
   if (vodPage > 0) {
     vodPage--;
-    renderVodGrid();
+    fetchVodPage();
   }
 });
 vodNextBtn.addEventListener("click", () => {
-  vodPage++;
-  renderVodGrid();
+  if ((vodPage + 1) * VOD_PAGE_SIZE < vodTotal) {
+    vodPage++;
+    fetchVodPage();
+  }
 });
 
 async function loadVod() {
-  vodGridEl.innerHTML = `<div class="vod-empty">Carregando...</div>`;
+  vodLoaded = true;
+  await populateVodGenres();
+  await fetchVodPage();
+}
+
+async function populateVodGenres() {
   try {
-    const resp = await fetch(`p/${encodeURIComponent(currentToken)}/vod`);
+    const resp = await fetch(`p/${encodeURIComponent(currentToken)}/vod/genres`);
+    const data = await resp.json();
+    vodGenreEl.innerHTML =
+      `<option value="">Gênero…</option>` +
+      (data.genres || []).map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+  } catch {
+    vodGenreEl.innerHTML = `<option value="">Gênero…</option>`;
+  }
+}
+
+async function fetchVodPage() {
+  vodGridEl.innerHTML = `<div class="vod-empty">Carregando...</div>`;
+  const params = new URLSearchParams({ limit: VOD_PAGE_SIZE, offset: vodPage * VOD_PAGE_SIZE });
+  if (vodActiveType === "anime") {
+    params.set("genre", "Anime");
+  } else {
+    params.set("type", vodActiveType);
+    if (vodActiveGenre) params.set("genre", vodActiveGenre);
+  }
+  if (vodSearchTerm) params.set("q", vodSearchTerm);
+
+  try {
+    const resp = await fetch(`p/${encodeURIComponent(currentToken)}/vod?${params}`);
     if (!resp.ok) {
       vodGridEl.innerHTML = `<div class="vod-empty">Falha ao carregar o catálogo.</div>`;
       return;
     }
     const data = await resp.json();
-    vodLoaded = true;
-    currentVodTitles = data.titles || [];
-    populateVodGenres();
-    renderVodGrid();
+    vodTotal = data.count || 0;
+    renderVodGrid(data.titles || []);
   } catch {
     vodGridEl.innerHTML = `<div class="vod-empty">Falha de rede ao carregar o catálogo.</div>`;
   }
 }
 
-function populateVodGenres() {
-  const genres = Array.from(new Set(currentVodTitles.map((t) => t.genre).filter(Boolean))).sort();
-  vodGenreEl.innerHTML =
-    `<option value="">Todos os gêneros</option>` + genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
-}
-
-function filteredVodTitles() {
-  return currentVodTitles.filter((t) => {
-    if (vodActiveType && t.type !== vodActiveType) return false;
-    if (vodActiveGenre && t.genre !== vodActiveGenre) return false;
-    if (vodSearchTerm && !t.title.toLowerCase().includes(vodSearchTerm)) return false;
-    return true;
-  });
-}
-
-function renderVodGrid() {
-  if (!currentVodTitles.length) {
-    vodGridEl.innerHTML = `<div class="vod-empty">Catálogo ainda vazio — adicione títulos conforme for conseguindo autorização (ver README.md).</div>`;
-    vodCountEl.textContent = "";
-    vodPageInfoEl.textContent = "";
-    vodPrevBtn.disabled = true;
-    vodNextBtn.disabled = true;
-    return;
-  }
-
-  const filtered = filteredVodTitles();
-  if (!filtered.length) {
-    vodGridEl.innerHTML = `<div class="vod-empty">Nenhum título encontrado com esse filtro.</div>`;
-    vodCountEl.textContent = `0 de ${currentVodTitles.length} título(s)`;
-    vodPageInfoEl.textContent = "";
-    vodPrevBtn.disabled = true;
-    vodNextBtn.disabled = true;
-    return;
-  }
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / VOD_PAGE_SIZE));
-  vodPage = Math.min(vodPage, totalPages - 1);
-  const start = vodPage * VOD_PAGE_SIZE;
-  const pageItems = filtered.slice(start, start + VOD_PAGE_SIZE);
-
-  vodCountEl.textContent = `${filtered.length} de ${currentVodTitles.length} título(s)`;
-  vodPageInfoEl.textContent = `Página ${vodPage + 1} de ${totalPages}`;
+function renderVodGrid(pageItems) {
+  const totalPages = Math.max(1, Math.ceil(vodTotal / VOD_PAGE_SIZE));
+  vodCountEl.textContent = vodTotal ? `${vodTotal} título(s)` : "";
+  vodPageInfoEl.textContent = vodTotal ? `Página ${vodPage + 1} de ${totalPages}` : "";
   vodPrevBtn.disabled = vodPage <= 0;
-  vodNextBtn.disabled = vodPage >= totalPages - 1;
+  vodNextBtn.disabled = (vodPage + 1) * VOD_PAGE_SIZE >= vodTotal;
+
+  if (!pageItems.length) {
+    vodGridEl.innerHTML = `<div class="vod-empty">Nenhum título encontrado com esse filtro.</div>`;
+    return;
+  }
 
   vodGridEl.innerHTML = "";
   pageItems.forEach((t) => {
@@ -783,9 +807,16 @@ function renderVodGrid() {
   });
 }
 
+function hideLangPicker() {
+  const el = document.getElementById("lang-picker");
+  el.hidden = true;
+  el.innerHTML = "";
+}
+
 async function openVodTitle(title) {
   const panel = document.getElementById("epg-panel");
   switchTab("live"); // volta pro player pra assistir
+  hideLangPicker(); // VOD não tem variação de idioma (ainda) — limpa o seletor da TV ao vivo
   statusEl.textContent = `Carregando "${title.title}"...`;
   panel.innerHTML = "";
 

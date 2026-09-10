@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .categories_pt import category_label as _cat_label
 from .models import AccessToken, Channel, Program, Stream, VodItem, VodTitle, WorkerRun
 
 
@@ -13,6 +14,16 @@ def get_dashboard_stats(db: Session) -> dict:
     total_channels = db.query(func.count(Channel.id)).filter(Channel.is_active.is_(True)).scalar() or 0
     total_streams = db.query(func.count(Stream.id)).scalar() or 0
     healthy_streams = db.query(func.count(Stream.id)).filter(Stream.is_healthy.is_(True)).scalar() or 0
+
+    # streams por idioma (lang_label NULL = "Português": canal de país lusófono
+    # ou fonte brasileira sem info de feed do iptv-org)
+    lang_rows = (
+        db.query(func.coalesce(Stream.lang_label, "Português"), func.count(Stream.id))
+        .group_by(func.coalesce(Stream.lang_label, "Português"))
+        .order_by(func.count(Stream.id).desc())
+        .all()
+    )
+    streams_by_language = [{"language": lang, "count": count} for lang, count in lang_rows]
 
     # canais ativos que tem pelo menos 1 stream saudavel (o que de fato aparece na playlist)
     channels_with_healthy = (
@@ -34,7 +45,10 @@ def get_dashboard_stats(db: Session) -> dict:
         .order_by(func.count(Channel.id).desc())
         .all()
     )
-    by_category = [{"category": cat or "sem categoria", "count": count} for cat, count in category_rows]
+    by_category = [
+        {"category": _cat_label(cat) or "Sem categoria", "count": count}
+        for cat, count in category_rows
+    ]
 
     total_programs = db.query(func.count(Program.id)).scalar() or 0
     channels_with_epg = db.query(func.count(func.distinct(Program.channel_id))).scalar() or 0
@@ -92,6 +106,7 @@ def get_dashboard_stats(db: Session) -> dict:
             "total": total_streams,
             "healthy": healthy_streams,
             "unhealthy": total_streams - healthy_streams,
+            "by_language": streams_by_language,
         },
         "epg": {
             "total_programs": total_programs,
