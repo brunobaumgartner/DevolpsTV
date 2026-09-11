@@ -53,6 +53,7 @@ export function VideoBox({ url, onFatal, onTime, onEnded, startAt, class: cls })
       controls
       autoplay
       playsinline
+      referrerpolicy="no-referrer"
       onLoadedMetadata={onLoaded}
       onTimeUpdate={onTimeUpdate}
       onEnded={handleEnded}
