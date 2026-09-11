@@ -45,10 +45,12 @@ def create_session(db: Session, admin_user_id: int) -> str:
     return token
 
 
-def require_admin(
+def require_login(
     admin_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     db: Session = Depends(get_db),
 ) -> AdminUser:
+    """Qualquer conta logada (role "admin" ou "user"). Base pra require_admin
+    e pro /admin/me que agora serve de login pro site inteiro."""
     if not admin_session:
         raise HTTPException(status_code=401, detail="Não autenticado")
 
@@ -64,4 +66,12 @@ def require_admin(
     user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    return user
+
+
+def require_admin(user: AdminUser = Depends(require_login)) -> AdminUser:
+    """Igual a require_login, mas só deixa passar role "admin" — usado em
+    todo endpoint de escrita/gestão do painel."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Sem permissão de administrador")
     return user

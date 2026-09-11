@@ -9,7 +9,7 @@
   body {
     @apply bg-bg text-text font-body;
     margin: 0;
-    min-height: 100dvh;
+    min-height: 100vh;
     background-image:
       radial-gradient(circle at 15% 0%, #071a2b 0%, transparent 45%),
       radial-gradient(circle at 100% 30%, #061622 0%, transparent 50%);
@@ -43,7 +43,7 @@
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full border border-border bg-card-hover
-      px-3 py-1 text-xs text-muted;
+      px-3.5 py-1.5 text-[13px] text-muted;
   }
   .chip.active {
     @apply bg-gradient-to-br from-accent to-accent2 text-[#041018] border-transparent font-semibold;

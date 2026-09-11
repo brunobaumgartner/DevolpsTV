@@ -187,7 +187,8 @@ export function AdminSystem() {
       </Panel>
 
       <Panel title="Última execução dos jobs do worker">
-        <table class="w-full text-xs">
+        <div class="overflow-x-auto">
+        <table class="w-full text-xs" style="min-width:560px">
           <tbody>
             {wr.length === 0 && (
               <tr>
@@ -196,17 +197,18 @@ export function AdminSystem() {
             )}
             {wr.map((w) => (
               <tr class="border-t border-border/60">
-                <td class="py-1.5 pr-3 text-text">{w.job_name}</td>
-                <td class="py-1.5 pr-3">
+                <td class="py-1.5 pr-3 text-text whitespace-nowrap">{w.job_name}</td>
+                <td class="py-1.5 pr-3 whitespace-nowrap">
                   <span class={w.status === "ok" ? "text-ok" : "text-danger"}>{w.status}</span>
                 </td>
-                <td class="py-1.5 pr-3 text-muted">{fmtAge(w.age_seconds)}</td>
-                <td class="py-1.5 pr-3 text-muted">{fmtDur(w.duration_seconds)}</td>
-                <td class="py-1.5 text-muted">{w.summary}</td>
+                <td class="py-1.5 pr-3 text-muted whitespace-nowrap">{fmtAge(w.age_seconds)}</td>
+                <td class="py-1.5 pr-3 text-muted whitespace-nowrap">{fmtDur(w.duration_seconds)}</td>
+                <td class="py-1.5 text-muted max-w-[320px] truncate">{w.summary}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </Panel>
     </div>
   );

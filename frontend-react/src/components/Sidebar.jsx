@@ -1,5 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
-import { Link, useLocation } from "../lib/router.jsx";
+import { Link, useLocation, navigate } from "../lib/router.jsx";
+import { adminApi } from "../lib/api.js";
 
 const NAV = [
   ["/", "Início", "▚"],
@@ -9,7 +10,7 @@ const NAV = [
   ["/animes", "Anime", "✦"],
 ];
 
-export function Sidebar({ isAdmin }) {
+export function Sidebar({ isAdmin, onLogout }) {
   const { path } = useLocation();
   const [open, setOpen] = useState(false);
 
@@ -20,11 +21,11 @@ export function Sidebar({ isAdmin }) {
     <Link
       href={href}
       class={
-        "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors " +
+        "flex items-center gap-3 rounded-md px-3 py-2.5 text-[15px] transition-colors " +
         (exact && path === href ? "bg-card text-accent" : "text-muted hover:text-text hover:bg-card/60")
       }
     >
-      <span class="w-5 text-center text-[13px] opacity-80">{icon}</span>
+      <span class="w-5 text-center text-sm">{icon}</span>
       <span>{label}</span>
     </Link>
   );
@@ -46,7 +47,7 @@ export function Sidebar({ isAdmin }) {
 
       <aside
         class={
-          "fixed top-0 left-0 z-50 h-[100dvh] w-[210px] flex flex-col bg-bg border-r border-border " +
+          "fixed top-0 left-0 z-50 h-screen w-[210px] flex flex-col bg-bg border-r border-border " +
           "transition-transform duration-200 md:translate-x-0 " +
           (open ? "translate-x-0" : "-translate-x-full")
         }
@@ -63,6 +64,17 @@ export function Sidebar({ isAdmin }) {
         <div class="px-2 py-3 border-t border-border flex flex-col gap-1">
           {item("/filmes", "Buscar", "🔍", false)}
           {isAdmin && item("/admin", "Admin", "⚙", false)}
+          <button
+            onClick={async () => {
+              await adminApi.logout();
+              onLogout?.();
+              navigate("/");
+            }}
+            class="flex items-center gap-3 rounded-md px-3 py-2.5 text-[15px] text-muted hover:text-danger hover:bg-card/60 transition-colors"
+          >
+            <span class="w-5 text-center text-sm">⏻</span>
+            <span>Sair</span>
+          </button>
         </div>
       </aside>
     </>

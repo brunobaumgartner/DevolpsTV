@@ -9,7 +9,7 @@ export default {
         card: "#0a1420",
         "card-hover": "#0e1c2e",
         text: "#d7e6f5",
-        muted: "#5b7a94",
+        muted: "#93acc9",
         accent: "#00d9ff",
         accent2: "#2f6fff",
         border: "#123049",

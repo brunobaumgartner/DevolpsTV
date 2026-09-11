@@ -142,15 +142,20 @@ class WatchProgress(Base):
 
 
 class AdminUser(Base):
-    """Login do painel de administração (cadastro de links VOD) — separado do
-    esquema de token-na-URL usado pra consumir a playlist."""
+    """Login do site — TODO acesso passa por aqui agora, não só o painel
+    admin. `role` decide o que a conta vê: "admin" (lista + painel completo)
+    ou "user" (só a lista, via o AccessToken em `access_token_id`)."""
 
     __tablename__ = "admin_users"
 
     id = Column(Integer, primary_key=True)
     username = Column(String(100), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default="admin", server_default="admin")
+    access_token_id = Column(Integer, ForeignKey("access_tokens.id", ondelete="SET NULL"))
     created_at = Column(DateTime, server_default=func.now())
+
+    access_token = relationship("AccessToken")
 
 
 class AdminSession(Base):

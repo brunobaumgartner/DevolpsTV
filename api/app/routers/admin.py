@@ -2,6 +2,7 @@
 séries) via formulário web, além do importador CSV (api/app/import_vod.py,
 continua existindo pra cargas em lote)."""
 
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -9,7 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
-from ..auth_admin import SESSION_COOKIE_NAME, create_session, require_admin, verify_password
+from ..auth_admin import (
+    SESSION_COOKIE_NAME,
+    create_session,
+    hash_password,
+    require_admin,
+    require_login,
+    verify_password,
+)
 from ..channel_classifier import get_classify_channels_job, start_classify_channels_job
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
@@ -109,8 +117,17 @@ def logout(response: Response):
 
 
 @router.get("/me")
-def me(admin: AdminUser = Depends(require_admin)):
-    return {"username": admin.username}
+def me(user: AdminUser = Depends(require_login), db: Session = Depends(get_db)):
+    """Whoami pro site inteiro agora (não só o painel): devolve o papel e o
+    token de conteúdo já resolvido, pra o front não precisar mais pedir pra
+    colar link nenhum."""
+    token = user.access_token.token if user.access_token else None
+    if token is None and user.role == "admin":
+        # admin sem token vinculado: pega o 1º token ativo da conta (mesmo
+        # comportamento de antes, quando o front buscava via /admin/tokens)
+        t = db.query(AccessToken).filter(AccessToken.is_active.is_(True)).order_by(AccessToken.created_at).first()
+        token = t.token if t else None
+    return {"username": user.username, "role": user.role, "token": token}
 
 
 @router.get("/dashboard")
@@ -645,3 +662,72 @@ def db_query(payload: SqlQuery, _admin: AdminUser = Depends(require_admin)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # erro de SQL do próprio banco
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}"[:400])
+
+
+# ---------------- Usuários do site (login admin/usuário) ----------------
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"  # "admin" ou "user"
+    label: Optional[str] = None  # rótulo do token, só pra role "user"
+
+
+@router.get("/users")
+def list_users(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    users = db.query(AdminUser).order_by(AdminUser.created_at).all()
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "role": u.role,
+                "token": u.access_token.token if u.access_token else None,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in users
+        ]
+    }
+
+
+@router.post("/users")
+def create_user(
+    payload: UserCreateRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    if payload.role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="role precisa ser 'admin' ou 'user'")
+    if not payload.username.strip() or not payload.password:
+        raise HTTPException(status_code=400, detail="usuário e senha são obrigatórios")
+    if db.query(AdminUser).filter(AdminUser.username == payload.username).first():
+        raise HTTPException(status_code=409, detail="já existe um usuário com esse nome")
+
+    user = AdminUser(
+        username=payload.username.strip(),
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+    )
+    if payload.role == "user":
+        # cada usuário comum ganha seu próprio token de conteúdo — assim dá
+        # pra revogar 1 pessoa sem afetar as outras
+        access = AccessToken(token=secrets.token_urlsafe(24), label=payload.label or payload.username)
+        db.add(access)
+        db.flush()
+        user.access_token_id = access.id
+    db.add(user)
+    db.commit()
+    return {"ok": True, "id": user.id}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(require_admin)):
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="não dá pra apagar o próprio usuário logado")
+    user = db.query(AdminUser).filter(AdminUser.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="usuário não encontrado")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}

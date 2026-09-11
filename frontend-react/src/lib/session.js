@@ -1,46 +1,25 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useCallback } from "preact/hooks";
 import { adminApi, setToken } from "./api.js";
 
-const LS_TOKEN = "devolpstv:token";
-
-// descobre o token de acesso:
-//  - admin logado -> pega o 1º token da conta automaticamente
-//  - senão -> token salvo no navegador (colado pelo usuário)
+// login é obrigatório pra tudo agora (não só pro painel admin). /admin/me
+// devolve {username, role, token} quando a sessão (cookie) é válida — o
+// token de conteúdo já vem resolvido, sem precisar colar link nenhum.
 export function useSession() {
-  const [s, setS] = useState({ ready: false, isAdmin: false, token: null });
+  const [s, setS] = useState({ ready: false, authed: false, role: null, token: null, username: null });
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      let isAdmin = false;
-      let token = null;
-      try {
-        await adminApi.me();
-        isAdmin = true;
-        const { tokens } = await adminApi.tokens();
-        token = tokens?.[0]?.token || null;
-      } catch {
-        try {
-          token = localStorage.getItem(LS_TOKEN);
-        } catch {}
-      }
-      if (!alive) return;
-      if (token) setToken(token);
-      setS({ ready: true, isAdmin, token });
-    })();
-    return () => {
-      alive = false;
-    };
+  const refresh = useCallback(async () => {
+    try {
+      const me = await adminApi.me();
+      if (me.token) setToken(me.token);
+      setS({ ready: true, authed: true, role: me.role, token: me.token, username: me.username });
+    } catch {
+      setS({ ready: true, authed: false, role: null, token: null, username: null });
+    }
   }, []);
 
-  return {
-    ...s,
-    saveToken(t) {
-      try {
-        localStorage.setItem(LS_TOKEN, t);
-      } catch {}
-      setToken(t);
-      setS((p) => ({ ...p, token: t }));
-    },
-  };
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { ...s, isAdmin: s.role === "admin", refresh };
 }

@@ -1,7 +1,7 @@
 import { useSession } from "./lib/session.js";
 import { Switch, Route } from "./lib/router.jsx";
 import { Sidebar } from "./components/Sidebar.jsx";
-import { TokenGate } from "./components/TokenGate.jsx";
+import { Login } from "./components/Login.jsx";
 import { lazy } from "./lib/lazy.jsx";
 import { Home } from "./pages/Home.jsx";
 import { Watch } from "./pages/Watch.jsx";
@@ -15,16 +15,16 @@ export function App() {
   const session = useSession();
 
   if (!session.ready) {
-    return <div class="min-h-[100dvh] grid place-items-center text-muted text-sm">Carregando…</div>;
+    return <div class="min-h-screen grid place-items-center text-muted text-sm">Carregando…</div>;
   }
-  if (!session.token) {
-    return <TokenGate onSave={session.saveToken} />;
+  if (!session.authed) {
+    return <Login onOk={session.refresh} />;
   }
 
   return (
     <>
-      <Sidebar isAdmin={session.isAdmin} />
-      <main class="md:pl-[210px] min-h-[100dvh]">
+      <Sidebar isAdmin={session.isAdmin} onLogout={session.refresh} />
+      <main class="md:pl-[210px] min-h-screen">
         <Switch fallback={<Stub />}>
           <Route path="/" component={Home} />
           <Route path="/assistir/:tipo/:id" component={Watch} />
@@ -33,7 +33,7 @@ export function App() {
           <Route path="/series" render={() => <VodList mode="series" />} />
           <Route path="/animes" render={() => <VodList mode="anime" />} />
           <Route path="/genero/:nome" render={({ params }) => <VodList mode="genre" params={params} />} />
-          <Route path="/admin/*" component={AdminApp} />
+          <Route path="/admin/*" render={() => <AdminApp role={session.role} />} />
         </Switch>
       </main>
     </>

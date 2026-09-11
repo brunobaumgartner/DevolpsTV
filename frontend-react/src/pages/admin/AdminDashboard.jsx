@@ -99,21 +99,25 @@ export function AdminDashboard() {
       </Panel>
 
       <Panel title="Jobs do worker">
-        <table class="w-full text-xs">
-          <tbody>
-            {Object.keys(JOB_LABELS).map((k) => {
-              const j = s.worker_jobs.find((x) => x.job_name === k);
-              return (
-                <tr class="border-t border-border first:border-0">
-                  <td class="py-1.5">{JOB_LABELS[k]}</td>
-                  <td class={"py-1.5 " + (j?.status === "error" ? "text-danger" : "text-ok")}>{j?.status || "—"}</td>
-                  <td class="py-1.5 text-muted">{fmtAge(j?.age_seconds)}</td>
-                  <td class="py-1.5 text-muted truncate max-w-[280px]">{j?.summary || ""}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs" style="min-width:520px">
+            <tbody>
+              {Object.keys(JOB_LABELS).map((k) => {
+                const j = s.worker_jobs.find((x) => x.job_name === k);
+                return (
+                  <tr class="border-t border-border first:border-0">
+                    <td class="py-1.5 pr-3 whitespace-nowrap">{JOB_LABELS[k]}</td>
+                    <td class={"py-1.5 pr-3 whitespace-nowrap " + (j?.status === "error" ? "text-danger" : "text-ok")}>
+                      {j?.status || "—"}
+                    </td>
+                    <td class="py-1.5 pr-3 text-muted whitespace-nowrap">{fmtAge(j?.age_seconds)}</td>
+                    <td class="py-1.5 text-muted max-w-[320px] truncate">{j?.summary || ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <Panel title="Streams por idioma"><Bars rows={langRows} labelKey="label" valueKey="v" /></Panel>

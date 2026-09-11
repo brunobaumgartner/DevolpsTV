@@ -99,6 +99,11 @@ export const adminApi = {
   dbTable: (name) => req(`admin/db/tables/${encodeURIComponent(name)}`),
   dbQuery: (sql) => jpost("admin/db/query", { sql }),
 
+  // usuários do site (login admin/usuário)
+  users: () => req("admin/users"),
+  createUser: (b) => jpost("admin/users", b),
+  deleteUser: (id) => jdel(`admin/users/${id}`),
+
   // gêneros manuais
   titlesWithoutGenre: (type, limit, offset) =>
     req(`admin/vod/titles-without-genre?type=${type}&limit=${limit}&offset=${offset}`),
