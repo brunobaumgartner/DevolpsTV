@@ -62,7 +62,6 @@ export function Sidebar({ isAdmin, onLogout }) {
           {NAV.map(([h, l, i]) => item(h, l, i))}
         </nav>
         <div class="px-2 py-3 border-t border-border flex flex-col gap-1">
-          {item("/filmes", "Buscar", "🔍", false)}
           {isAdmin && item("/admin", "Admin", "⚙", false)}
           <button
             onClick={async () => {
