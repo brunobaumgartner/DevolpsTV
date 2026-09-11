@@ -1,7 +1,8 @@
 import { useLocation, Link } from "../../lib/router.jsx";
 import { AdminDashboard } from "./AdminDashboard.jsx";
 import { AdminGenres } from "./AdminGenres.jsx";
-import { AdminCatalog } from "./AdminCatalog.jsx";
+import { AdminCadastroVod } from "./AdminCadastroVod.jsx";
+import { AdminCadastroCanais } from "./AdminCadastroCanais.jsx";
 import { AdminVodCatalog } from "./AdminVodCatalog.jsx";
 import { AdminChannelCatalog } from "./AdminChannelCatalog.jsx";
 import { AdminSystem } from "./AdminSystem.jsx";
@@ -11,7 +12,8 @@ import { AdminUsers } from "./AdminUsers.jsx";
 const TABS = [
   ["/admin", "Dashboard"],
   ["/admin/generos", "Gêneros"],
-  ["/admin/cadastro", "Cadastro"],
+  ["/admin/cadastro-vod", "Cadastrar VOD"],
+  ["/admin/cadastro-canais", "Cadastrar Canais"],
   ["/admin/catalogo", "Catálogo"],
   ["/admin/canais", "Canais"],
   ["/admin/sistema", "Sistema"],
@@ -38,8 +40,10 @@ export function AdminApp({ role }) {
   const Page =
     path === "/admin/generos"
       ? AdminGenres
-      : path === "/admin/cadastro"
-      ? AdminCatalog
+      : path === "/admin/cadastro-vod"
+      ? AdminCadastroVod
+      : path === "/admin/cadastro-canais"
+      ? AdminCadastroCanais
       : path === "/admin/catalogo"
       ? AdminVodCatalog
       : path === "/admin/canais"

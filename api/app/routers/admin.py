@@ -28,6 +28,7 @@ from ..imdb_classifier import get_imdb_classify_job, is_dataset_available, start
 from ..job_registry import list_jobs, prune, request_cancel
 from ..poster_fetch import get_tmdb_job, start_tmdb_job
 from ..import_vod import get_import_job, start_import_job
+from ..import_channels import get_import_job as get_import_channels_job, start_import_job as start_import_channels_job
 from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle, WorkerRun
 from ..system_info import snapshot as system_snapshot
@@ -259,6 +260,38 @@ async def import_csv_upload(
 @router.get("/vod/import-csv/{job_id}/status")
 def import_csv_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
     job = get_import_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de importação não encontrado (ou o container reiniciou)")
+    return job
+
+
+@router.post("/channels/import-csv")
+async def import_channels_csv_upload(
+    file: UploadFile,
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Mesma ideia do /vod/import-csv, só que pra canais de TV ao vivo (ver
+    api/app/import_channels.py pro formato do CSV)."""
+    raw = await file.read(_MAX_CSV_BYTES + 1)
+    if len(raw) > _MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail=f"CSV maior que {_MAX_CSV_BYTES // (1024*1024)}MB")
+
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Arquivo precisa ser CSV em UTF-8")
+
+    try:
+        job_id = start_import_channels_job(text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"job_id": job_id}
+
+
+@router.get("/channels/import-csv/{job_id}/status")
+def import_channels_csv_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_import_channels_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job de importação não encontrado (ou o container reiniciou)")
     return job

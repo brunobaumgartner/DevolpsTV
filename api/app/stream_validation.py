@@ -26,6 +26,14 @@ Causa raiz #4 (confirmada 2026-09-09): o catálogo VOD (filmes/séries) usa
 bastante link .mp4 direto — outro formato sem `#EXTM3U`. Reconhecido pela
 "ftyp box" no início do arquivo (assinatura padrão de qualquer MP4/MOV
 válido: 4 bytes de tamanho + "ftyp") e/ou Content-Type video/mp4.
+
+Causa raiz #5 (confirmada 2026-09-11, filme "#SalveRosa"): confiar só no
+Content-Type pro caso direto (.mp4/.ts sem manifesto) aprovava links mortos
+— o provedor devolve uma paginazinha de erro (HTML de ~200 bytes) mas com o
+header `Content-Type: video/mp4` mentindo. O Firefox recusa tocar (corpo não
+é MP4 de verdade); o Chrome só fica com a tela preta. E o healthcheck
+aprovava os dois como "saudável". Agora exige um tamanho mínimo de corpo
+antes de confiar no Content-Type — nenhum vídeo de verdade cabe em <4KB.
 """
 
 from urllib.parse import urljoin
@@ -41,6 +49,11 @@ _MAX_MANIFEST_BYTES = 64 * 1024
 _TS_PACKET_SIZE = 188
 _TS_SYNC_BYTE = 0x47
 _TS_PACKETS_TO_CHECK = 8
+
+# nenhum segmento de vídeo real (mp4 ou ts) cabe em menos que isso — abaixo
+# do limite é sinal de página de erro disfarçada de vídeo (Content-Type
+# mentindo), não vídeo de verdade
+_MIN_MEDIA_BYTES = 4096
 
 
 def _read_bounded(resp: requests.Response) -> bytes:
@@ -130,7 +143,10 @@ def stream_is_really_playable(url: str, timeout: float, headers: dict | None = N
 
     # não é m3u8 — pode ser um .ts bruto ou um .mp4 direto, sem manifesto por
     # cima. Aceita se o Content-Type confirma (video/mp2t ou video/mp4) OU se
-    # o próprio conteúdo já parece um desses formatos de verdade.
+    # o próprio conteúdo já parece um desses formatos de verdade — mas só se
+    # o corpo tiver um tamanho plausível de vídeo (ver causa raiz #5).
+    if len(data) < _MIN_MEDIA_BYTES:
+        return False
     content_type_lower = (content_type or "").lower()
     if "mp2t" in content_type_lower or "mp4" in content_type_lower:
         return True

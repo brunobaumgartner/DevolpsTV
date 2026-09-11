@@ -11,7 +11,7 @@ from .config import ADMIN_PASSWORD, ADMIN_USERNAME, FRONTEND_DIR
 from .db import Base, SessionLocal, engine
 from .genre_classifier import seed_default_keywords_if_empty, sync_new_default_keywords
 from .models import AccessToken, AdminUser
-from .routers import admin, channels, health, hls_proxy, playlist, vod
+from .routers import admin, channels, health, hls_proxy, media_proxy, playlist, vod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("iptv-api")
@@ -31,6 +31,7 @@ app.include_router(health.router)
 app.include_router(playlist.router)
 app.include_router(channels.router)
 app.include_router(hls_proxy.router)
+app.include_router(media_proxy.router)
 app.include_router(vod.router)
 app.include_router(admin.router)
 

@@ -136,6 +136,16 @@ export const adminApi = {
   delStream: (id) => jdel(`admin/streams/${id}`),
 
   importCsvStatus: (id) => req(`admin/vod/import-csv/${id}/status`),
+  importChannelsCsvStatus: (id) => req(`admin/channels/import-csv/${id}/status`),
+  importChannelsCsv: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(BASE + "admin/channels/import-csv", { method: "POST", credentials: "include", body: fd }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+      return j;
+    });
+  },
   importCsv: (file) => {
     const fd = new FormData();
     fd.append("file", file);
