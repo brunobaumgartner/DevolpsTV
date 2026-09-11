@@ -116,7 +116,8 @@ export const adminApi = {
   delGenre: (genre) => jdel(`admin/genre-keywords/genre/${encodeURIComponent(genre)}`),
 
   // catálogo / cadastro
-  vodList: () => req("admin/vod"),
+  vodList: (params = {}) => req(`admin/vod?${new URLSearchParams(params)}`),
+  vodAdminDetail: (id) => req(`admin/vod/${id}`),
   addMovie: (b) => jpost("admin/vod/movie", b),
   addSeries: (b) => jpost("admin/vod/series", b),
   addEpisode: (titleId, b) => jpost(`admin/vod/${titleId}/episodes`, b),
@@ -124,6 +125,16 @@ export const adminApi = {
   delTitle: (id) => jdel(`admin/vod/titles/${id}`),
   delItem: (id) => jdel(`admin/vod/items/${id}`),
   addChannel: (b) => jpost("admin/channels", b),
+
+  // catálogo de canais
+  channelCategories: () => req("admin/channels/categories"),
+  channelList: (params = {}) => req(`admin/channels?${new URLSearchParams(params)}`),
+  channelDetail: (id) => req(`admin/channels/${id}`),
+  updateChannel: (id, b) => jpatch(`admin/channels/${id}`, b),
+  delChannel: (id) => jdel(`admin/channels/${id}`),
+  updateStream: (id, b) => jpatch(`admin/streams/${id}`, b),
+  delStream: (id) => jdel(`admin/streams/${id}`),
+
   importCsvStatus: (id) => req(`admin/vod/import-csv/${id}/status`),
   importCsv: (file) => {
     const fd = new FormData();

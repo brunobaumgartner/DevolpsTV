@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth_admin import (
@@ -145,31 +146,78 @@ def list_tokens(db: Session = Depends(get_db), _admin: AdminUser = Depends(requi
 
 
 @router.get("/vod")
-def admin_list_vod(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
-    titles = db.query(VodTitle).options(joinedload(VodTitle.items)).order_by(VodTitle.title).all()
+def admin_list_vod(
+    type: Optional[str] = None,  # noqa: A002
+    genre: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 60,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Paginado e filtrado — a tela Catálogo carrega 26k+ títulos, carregar
+    tudo de uma vez (com os 273k itens juntos, joinedload) era o que deixava
+    a tela de Cadastro pesada (achado real em 2026-09-11). Os itens/episódios
+    de cada título só vêm no detalhe (GET /admin/vod/{id}), aberto sob
+    demanda ao expandir um título na lista."""
+    limit = max(1, min(limit, 200))
+    base = db.query(VodTitle)
+    if type in ("movie", "series"):
+        base = base.filter(VodTitle.type == type)
+    if genre == "Outros":
+        base = base.filter(VodTitle.genre.is_(None))
+    elif genre:
+        base = base.filter(VodTitle.genre == genre)
+    if q:
+        base = base.filter(VodTitle.title.ilike(f"%{q.strip()}%"))
+
+    total = base.with_entities(func.count(VodTitle.id)).scalar() or 0
+    titles = base.order_by(VodTitle.title).offset(offset).limit(limit).all()
     return {
+        "count": total,
         "titles": [
             {
                 "id": t.id,
                 "type": t.type,
                 "title": t.title,
-                "description": t.description,
                 "poster_url": t.poster_url,
                 "genre": t.genre,
                 "year": t.year,
-                "items": [
-                    {
-                        "id": i.id,
-                        "season_number": i.season_number,
-                        "episode_number": i.episode_number,
-                        "episode_title": i.episode_title,
-                        "stream_url": i.stream_url,
-                    }
-                    for i in sorted(t.items, key=lambda i: (i.season_number or 0, i.episode_number or 0))
-                ],
             }
             for t in titles
-        ]
+        ],
+    }
+
+
+@router.get("/vod/{title_id}")
+def admin_vod_detail(
+    title_id: int,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Detalhe + episódios de 1 título — carregado só quando expande o card
+    na tela Catálogo (não em toda a listagem)."""
+    t = db.query(VodTitle).options(joinedload(VodTitle.items)).filter(VodTitle.id == title_id).first()
+    if t is None:
+        raise HTTPException(status_code=404, detail="Título não encontrado")
+    return {
+        "id": t.id,
+        "type": t.type,
+        "title": t.title,
+        "description": t.description,
+        "poster_url": t.poster_url,
+        "genre": t.genre,
+        "year": t.year,
+        "items": [
+            {
+                "id": i.id,
+                "season_number": i.season_number,
+                "episode_number": i.episode_number,
+                "episode_title": i.episode_title,
+                "stream_url": i.stream_url,
+            }
+            for i in sorted(t.items, key=lambda i: (i.season_number or 0, i.episode_number or 0))
+        ],
     }
 
 
@@ -410,6 +458,162 @@ def add_live_channel(
 
     db.commit()
     return {"channel_id": channel.id, "new_channel": is_new_channel, "stream_added": stream_added}
+
+
+# --- Catálogo de canais (listar/editar/apagar — o POST /channels acima só
+# cria/adiciona mirror; faltava ver e mexer no que já existe) ---
+
+
+class ChannelUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    logo_url: Optional[str] = None
+    is_broadcast_tv: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class StreamUpdateRequest(BaseModel):
+    url: Optional[str] = None
+    referrer: Optional[str] = None
+    user_agent: Optional[str] = None
+    lang_label: Optional[str] = None
+
+
+@router.get("/channels/categories")
+def admin_channel_categories(db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    rows = db.query(Channel.category, func.count(Channel.id)).group_by(Channel.category).all()
+    named = sorted(((c, n) for c, n in rows if c), key=lambda x: -x[1])
+    none_c = sum(n for c, n in rows if c is None)
+    out = [{"category": c, "count": n} for c, n in named]
+    if none_c:
+        out.append({"category": "Outros", "count": none_c})
+    return {"categories": out}
+
+
+@router.get("/channels")
+def admin_list_channels(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 30,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    limit = max(1, min(limit, 200))
+    base = db.query(Channel)
+    if category == "Outros":
+        base = base.filter(Channel.category.is_(None))
+    elif category:
+        base = base.filter(Channel.category == category)
+    if q:
+        base = base.filter(Channel.name.ilike(f"%{q.strip()}%"))
+
+    total = base.with_entities(func.count(Channel.id)).scalar() or 0
+    rows = (
+        base.add_columns(func.count(Stream.id).label("stream_count"))
+        .outerjoin(Stream, Stream.channel_id == Channel.id)
+        .group_by(Channel.id)
+        .order_by(Channel.name)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "count": total,
+        "channels": [
+            {
+                "id": c.id,
+                "tvg_id": c.tvg_id,
+                "name": c.name,
+                "category": c.category,
+                "logo_url": c.logo_url,
+                "is_broadcast_tv": c.is_broadcast_tv,
+                "is_active": c.is_active,
+                "stream_count": stream_count,
+            }
+            for (c, stream_count) in rows
+        ],
+    }
+
+
+@router.get("/channels/{channel_id}")
+def admin_channel_detail(channel_id: int, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    c = db.query(Channel).options(joinedload(Channel.streams)).filter(Channel.id == channel_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Canal não encontrado")
+    return {
+        "id": c.id,
+        "tvg_id": c.tvg_id,
+        "name": c.name,
+        "category": c.category,
+        "logo_url": c.logo_url,
+        "is_broadcast_tv": c.is_broadcast_tv,
+        "is_active": c.is_active,
+        "streams": [
+            {
+                "id": s.id,
+                "url": s.url,
+                "lang_label": s.lang_label,
+                "is_healthy": s.is_healthy,
+                "consecutive_failures": s.consecutive_failures,
+            }
+            for s in c.streams
+        ],
+    }
+
+
+@router.patch("/channels/{channel_id}")
+def admin_update_channel(
+    channel_id: int,
+    payload: ChannelUpdateRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    c = db.query(Channel).filter(Channel.id == channel_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Canal não encontrado")
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(c, field, value)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/channels/{channel_id}")
+def admin_delete_channel(channel_id: int, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    c = db.query(Channel).filter(Channel.id == channel_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Canal não encontrado")
+    db.delete(c)
+    db.commit()
+    return {"ok": True}
+
+
+@router.patch("/streams/{stream_id}")
+def admin_update_stream(
+    stream_id: int,
+    payload: StreamUpdateRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    s = db.query(Stream).filter(Stream.id == stream_id).first()
+    if s is None:
+        raise HTTPException(status_code=404, detail="Link não encontrado")
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(s, field, value)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/streams/{stream_id}")
+def admin_delete_stream(stream_id: int, db: Session = Depends(get_db), _admin: AdminUser = Depends(require_admin)):
+    s = db.query(Stream).filter(Stream.id == stream_id).first()
+    if s is None:
+        raise HTTPException(status_code=404, detail="Link não encontrado")
+    db.delete(s)
+    db.commit()
+    return {"ok": True}
 
 
 # --- Palavras-chave de gênero (classificação automática, editável) ---

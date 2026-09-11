@@ -2,6 +2,8 @@ import { useLocation, Link } from "../../lib/router.jsx";
 import { AdminDashboard } from "./AdminDashboard.jsx";
 import { AdminGenres } from "./AdminGenres.jsx";
 import { AdminCatalog } from "./AdminCatalog.jsx";
+import { AdminVodCatalog } from "./AdminVodCatalog.jsx";
+import { AdminChannelCatalog } from "./AdminChannelCatalog.jsx";
 import { AdminSystem } from "./AdminSystem.jsx";
 import { AdminDb } from "./AdminDb.jsx";
 import { AdminUsers } from "./AdminUsers.jsx";
@@ -10,6 +12,8 @@ const TABS = [
   ["/admin", "Dashboard"],
   ["/admin/generos", "Gêneros"],
   ["/admin/cadastro", "Cadastro"],
+  ["/admin/catalogo", "Catálogo"],
+  ["/admin/canais", "Canais"],
   ["/admin/sistema", "Sistema"],
   ["/admin/banco", "Banco"],
   ["/admin/usuarios", "Usuários"],
@@ -36,6 +40,10 @@ export function AdminApp({ role }) {
       ? AdminGenres
       : path === "/admin/cadastro"
       ? AdminCatalog
+      : path === "/admin/catalogo"
+      ? AdminVodCatalog
+      : path === "/admin/canais"
+      ? AdminChannelCatalog
       : path === "/admin/sistema"
       ? AdminSystem
       : path === "/admin/banco"

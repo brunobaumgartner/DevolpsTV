@@ -18,26 +18,28 @@ function num(v) {
 
 export function AdminCatalog() {
   const [genres, setGenres] = useState([]);
-  const [catalog, setCatalog] = useState([]);
 
-  const loadCatalog = () => adminApi.vodList().then((d) => setCatalog(d.titles || [])).catch(() => {});
   useEffect(() => {
     adminApi.genreKeywords().then((d) => setGenres((d.genres || []).map((g) => g.genre)));
-    loadCatalog();
   }, []);
 
   return (
     <div class="p-4 md:p-8 max-w-3xl">
-      <MovieForm genres={genres} onDone={loadCatalog} />
-      <SeriesForm genres={genres} onDone={loadCatalog} />
+      <MovieForm genres={genres} />
+      <SeriesForm genres={genres} />
       <ChannelForm />
-      <CsvImport onDone={loadCatalog} />
-      <Panel title="Catálogo">
-        {catalog.length === 0 && <div class="text-muted text-sm">Nada cadastrado.</div>}
-        {catalog.map((t) => (
-          <TitleCard t={t} onChange={loadCatalog} />
-        ))}
-      </Panel>
+      <CsvImport />
+      <p class="text-xs text-muted">
+        Pra ver, editar ou apagar o que já foi cadastrado, use as abas{" "}
+        <a href="#/admin/catalogo" class="text-accent hover:underline">
+          Catálogo
+        </a>{" "}
+        (filmes/séries) e{" "}
+        <a href="#/admin/canais" class="text-accent hover:underline">
+          Canais
+        </a>{" "}
+        (TV ao vivo).
+      </p>
     </div>
   );
 }
@@ -62,7 +64,7 @@ function MovieForm({ genres, onDone }) {
       await adminApi.addMovie({ title: f.title, genre: f.genre || null, year: num(f.year), poster_url: f.poster || null, stream_url: f.url || null, description: f.desc || null });
       setMsg(`"${f.title}" adicionado.`);
       setF({});
-      onDone();
+      onDone?.();
     } catch (err) {
       setMsg(err.message);
     }
@@ -97,7 +99,7 @@ function SeriesForm({ genres, onDone }) {
       });
       setMsg(`"${f.title}" adicionada.`);
       setF({});
-      onDone();
+      onDone?.();
     } catch (err) {
       setMsg(err.message);
     }
@@ -178,7 +180,7 @@ function CsvImport({ onDone }) {
           setPct(null);
           const st = j.stats || {};
           setMsg(`Importado: ${st.titulos_novos ?? 0} novo(s), ${st.titulos_atualizados ?? 0} atualizado(s), ${st.itens_novos ?? 0} item(ns).`);
-          onDone();
+          onDone?.();
           break;
         }
         if (j.status === "error") {
@@ -210,78 +212,3 @@ function CsvImport({ onDone }) {
   );
 }
 
-function TitleCard({ t, onChange }) {
-  return (
-    <div class="border border-border rounded p-3 mb-2">
-      <div class="flex items-center gap-2">
-        <strong class="text-sm flex-1">{t.title}</strong>
-        <span class="text-[11px] text-muted">
-          {t.type === "movie" ? "filme" : "série"}{t.genre ? " · " + t.genre : ""}{t.year ? " · " + t.year : ""}
-        </span>
-        <button
-          class="text-[11px] text-danger border border-danger rounded px-2 py-0.5"
-          onClick={async () => {
-            if (!confirm(`Excluir "${t.title}"?`)) return;
-            await adminApi.delTitle(t.id);
-            onChange();
-          }}
-        >
-          excluir
-        </button>
-      </div>
-      {t.items.map((it) => (
-        <ItemRow t={t} it={it} onChange={onChange} />
-      ))}
-      {t.type === "series" && <AddEpisode titleId={t.id} onChange={onChange} />}
-    </div>
-  );
-}
-
-function ItemRow({ t, it, onChange }) {
-  const [url, setUrl] = useState(it.stream_url || "");
-  const [saved, setSaved] = useState(false);
-  const label = t.type === "series" ? `T${it.season_number ?? "?"}E${it.episode_number ?? "?"} ${it.episode_title || ""}` : "Link do filme";
-  return (
-    <div class="flex items-center gap-2 py-1.5 border-t border-border text-xs">
-      <span class="w-32 shrink-0 text-muted truncate">{label}</span>
-      <input class="flex-1 bg-[#081019] border border-border rounded px-2 py-1" placeholder="sem link" value={url} onInput={(e) => setUrl(e.currentTarget.value)} />
-      <button
-        class="btn-ghost rounded px-2 py-1 border border-border"
-        onClick={async () => {
-          await adminApi.updateItem(it.id, { stream_url: url.trim() || null });
-          setSaved(true);
-          setTimeout(() => setSaved(false), 1500);
-        }}
-      >
-        {saved ? "✓" : "salvar"}
-      </button>
-      {t.type === "series" && (
-        <button class="text-danger" onClick={async () => { await adminApi.delItem(it.id); onChange(); }}>×</button>
-      )}
-    </div>
-  );
-}
-
-function AddEpisode({ titleId, onChange }) {
-  return (
-    <form
-      class="flex gap-1.5 mt-2"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        const els = e.currentTarget.elements;
-        await adminApi.addEpisode(titleId, {
-          season_number: num(els.s.value), episode_number: num(els.ep.value),
-          episode_title: els.t.value.trim() || null, stream_url: els.u.value.trim() || null,
-        });
-        e.currentTarget.reset();
-        onChange();
-      }}
-    >
-      <input name="s" type="number" placeholder="T" class="w-12 bg-[#081019] border border-border rounded px-2 py-1 text-xs" />
-      <input name="ep" type="number" placeholder="E" class="w-12 bg-[#081019] border border-border rounded px-2 py-1 text-xs" />
-      <input name="t" placeholder="Nome" class="flex-1 bg-[#081019] border border-border rounded px-2 py-1 text-xs" />
-      <input name="u" placeholder="Link" class="flex-1 bg-[#081019] border border-border rounded px-2 py-1 text-xs" />
-      <button class="btn-ghost rounded px-2 py-1 border border-border text-xs">+ ep</button>
-    </form>
-  );
-}
