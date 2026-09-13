@@ -9,10 +9,9 @@ importação, em vez de precisar de faxina manual de novo a cada CSV novo."""
 
 import re
 
-# pega "-----X-----" / "K----J" (3+ traços em qualquer lugar) e qualquer nome
-# que COMECE com "--" (regra simplificada em 2026-09-13: nenhum canal de
-# verdade começa com traço duplo -- "--Adultos--", "--Cable--", "--Honduras--"
-# e variantes sem fechamento tipo "--Alguma coisa" caem todas aqui)
+# nenhum canal de verdade começa com "-" ou ":" -- só separador/decoração
+# (--Adultos--, ----- X -----, : Chilevision, ::::: X :::::, -714_, .: X :.)
+# _DASH_SEPARATOR ainda cobre "K----J" (3+ traços no MEIO do nome, não no início)
 _DASH_SEPARATOR = re.compile(r"-{3,}")
 _UPDATE_NOTICE = re.compile(r"actualizacion|atualiza|tildes omitidas|limitacion del sistema", re.IGNORECASE)
 _BBCODE = re.compile(r"^\s*\[color", re.IGNORECASE)
@@ -22,7 +21,7 @@ def is_junk_channel_name(name: str | None) -> bool:
     if not name:
         return False
     stripped = name.strip()
-    if stripped.startswith("--") or stripped.startswith(".:"):
+    if stripped.startswith("-") or stripped.startswith(":") or stripped.startswith(".:"):
         return True
     if _DASH_SEPARATOR.search(stripped):
         return True

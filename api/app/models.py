@@ -225,5 +225,9 @@ class AccessToken(Base):
     token = Column(String(64), unique=True, nullable=False)
     label = Column(String(100))
     is_active = Column(Boolean, nullable=False, default=True)
+    # controla se esse token vê conteúdo com category/genre = "Adulto" (canais,
+    # filmes, séries, animes) -- padrão False, o admin liga manualmente só pro
+    # token que ele mesmo usa (ver ADULT_GENRE/ADULT_CATEGORY nos routers)
+    sees_adult_content = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, server_default=func.now())
     last_used_at = Column(DateTime)

@@ -959,11 +959,37 @@ def list_users(db: Session = Depends(get_db), _admin: AdminUser = Depends(requir
                 "username": u.username,
                 "role": u.role,
                 "token": u.access_token.token if u.access_token else None,
+                "sees_adult_content": u.access_token.sees_adult_content if u.access_token else False,
                 "created_at": u.created_at.isoformat() if u.created_at else None,
             }
             for u in users
         ]
     }
+
+
+class AdultContentRequest(BaseModel):
+    sees_adult_content: bool
+
+
+@router.patch("/users/{user_id}/adult-content")
+def set_user_adult_content(
+    user_id: int,
+    payload: AdultContentRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Liga/desliga se o token desse usuário vê conteúdo com
+    category/genre = "Adulto" (canais, filmes, séries, animes) -- ver
+    ADULT_GENRE/ADULT_CATEGORY nos routers públicos. Só faz sentido pra
+    role="user" (o admin não usa o app público com token)."""
+    user = db.query(AdminUser).filter(AdminUser.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="usuário não encontrado")
+    if user.access_token is None:
+        raise HTTPException(status_code=400, detail="esse usuário não tem token de acesso ao app (é admin)")
+    user.access_token.sees_adult_content = payload.sees_adult_content
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/users")

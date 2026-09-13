@@ -42,6 +42,11 @@ export function AdminUsers() {
     load();
   }
 
+  async function toggleAdult(u) {
+    await adminApi.setUserAdultContent(u.id, !u.sees_adult_content).catch((e) => alert(e.message));
+    load();
+  }
+
   return (
     <div class="p-4 md:p-8 max-w-3xl">
       <h1 class="text-lg text-accent font-display mb-4">Usuários</h1>
@@ -102,6 +107,12 @@ export function AdminUsers() {
                   {u.role === "admin" ? "admin" : "usuário"}
                 </span>
                 {u.token && <code class="text-[11px] text-muted">token: {u.token}</code>}
+                {u.token && (
+                  <label class="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer">
+                    <input type="checkbox" checked={u.sees_adult_content} onChange={() => toggleAdult(u)} />
+                    vê conteúdo adulto
+                  </label>
+                )}
                 <button class="ml-auto text-xs text-muted hover:text-danger" onClick={() => remove(u)}>
                   apagar
                 </button>

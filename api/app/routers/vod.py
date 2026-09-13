@@ -25,10 +25,15 @@ class FailureReport(BaseModel):
 # valor especial no filtro de gênero pra "títulos sem gênero"
 GENRE_NONE = "Outros"
 
-# gênero "Adulto" nunca aparece pro público (chip, listagem, busca, Home,
-# detalhe, resolve) -- só o admin vê e gerencia esse conteúdo (/admin/vod/*,
-# sem esse filtro). Pedido explícito do produto em 2026-09-13.
+# gênero "Adulto" só aparece (chip, listagem, busca, Home, detalhe, resolve)
+# pro token marcado com sees_adult_content -- todo token novo nasce sem essa
+# permissão, o admin liga manualmente pro token que ele mesmo usa. Pedido
+# explícito do produto em 2026-09-13.
 ADULT_GENRE = "Adulto"
+
+
+def _hide_adult(access: AccessToken) -> bool:
+    return not (access and access.sees_adult_content)
 
 # fração do vídeo a partir da qual consideramos "assistido até o fim"
 FINISH_RATIO = 0.92
@@ -51,9 +56,11 @@ def list_vod(
     (era isso que deixava lento: 25k títulos puxavam 237k itens juntos) — a
     disponibilidade e a contagem de episódios vêm de agregados baratos, e a
     lista de episódios só é carregada ao abrir um título (/vod/{id})."""
-    # genre != ADULT_GENRE sozinho excluiria também quem tem genre NULL (NULL
-    # != 'Adulto' dá NULL em SQL, não TRUE) -- por isso o OR explícito
-    base = db.query(VodTitle).filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
+    base = db.query(VodTitle)
+    if _hide_adult(_access):
+        # genre != ADULT_GENRE sozinho excluiria também quem tem genre NULL
+        # (NULL != 'Adulto' dá NULL em SQL, não TRUE) -- por isso o OR explícito
+        base = base.filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
     if type in ("movie", "series"):
         base = base.filter(VodTitle.type == type)
     if genre == GENRE_NONE:
@@ -145,7 +152,12 @@ def list_vod_genres(
     último). Sem 'Todos'. `?type=movie|series` escopa a contagem pro tipo
     daquela tela (sem isso, os chips de gênero misturavam filme+série)."""
     response.headers["Cache-Control"] = "public, max-age=300"
-    return {"genres": [{"genre": g, "count": c} for g, c in _genre_counts(db, type)]}
+    return {
+        "genres": [
+            {"genre": g, "count": c}
+            for g, c in _genre_counts(db, type, include_adult=not _hide_adult(_access))
+        ]
+    }
 
 
 @router.get("/p/{token}/vod/home")
@@ -161,7 +173,7 @@ def vod_home(
     """As primeiras fileiras da Home num request só (senão a Home dispara ~20
     requests, um por gênero). Sem itens/episódios."""
     out = []
-    for genre, _count in _genre_counts(db)[:max_genres]:
+    for genre, _count in _genre_counts(db, include_adult=not _hide_adult(_access))[:max_genres]:
         q = db.query(VodTitle)
         if genre == GENRE_NONE:
             q = q.filter(VodTitle.genre.is_(None))
@@ -200,9 +212,9 @@ def vod_detail(
         .filter(VodTitle.id == title_id)
         .first()
     )
-    # gênero "Adulto" é admin-only -- 404 (não 403, mesma lógica do
+    # gênero "Adulto" só pro token autorizado -- 404 (não 403, mesma lógica do
     # require_valid_token) pra não confirmar que o ID existe
-    if t is None or t.genre == ADULT_GENRE:
+    if t is None or (t.genre == ADULT_GENRE and _hide_adult(_access)):
         raise HTTPException(status_code=404, detail="Título não encontrado")
 
     items = sorted(t.items, key=lambda i: (i.season_number or 0, i.episode_number or 0))
@@ -264,8 +276,8 @@ def resolve_vod_item(
         .filter(VodItem.id == item_id)
         .first()
     )
-    # gênero "Adulto" é admin-only -- mesma regra do vod_detail
-    if item is not None and item.vod_title.genre == ADULT_GENRE:
+    # gênero "Adulto" só pro token autorizado -- mesma regra do vod_detail
+    if item is not None and item.vod_title.genre == ADULT_GENRE and _hide_adult(_access):
         item = None
     if item is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")

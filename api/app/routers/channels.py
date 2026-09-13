@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
@@ -22,25 +22,39 @@ router = APIRouter()
 # valor especial no filtro de categoria pra "canais sem categoria"
 CATEGORY_NONE = "Sem categoria"
 
+# categoria "Adulto" só aparece (chip, listagem, Home, resolve) pro token
+# marcado com sees_adult_content -- mesma regra do gênero "Adulto" do VOD
+# (ver ADULT_GENRE em routers/vod.py). Pedido explícito do produto em 2026-09-13.
+ADULT_CATEGORY = "Adulto"
+
 
 class FailureReport(BaseModel):
     url: str
 
 
-def _visible_channels_query(db: Session):
+def _hide_adult(access: AccessToken) -> bool:
+    return not (access and access.sees_adult_content)
+
+
+def _visible_channels_query(db: Session, hide_adult: bool = True):
     """Canais que aparecem na listagem: ativos e com pelo menos 1 stream
     cadastrado (mesmo critério de active_channels_with_all_streams, mas sem
     trazer os streams — usado tanto pra paginar quanto pra contar categorias
     sem carregar o catálogo inteiro)."""
-    return db.query(Channel).filter(Channel.is_active.is_(True)).filter(Channel.streams.any())
+    q = db.query(Channel).filter(Channel.is_active.is_(True)).filter(Channel.streams.any())
+    if hide_adult:
+        # category != ADULT_CATEGORY sozinho excluiria quem tem category NULL
+        # (NULL != 'Adulto' dá NULL em SQL, não TRUE) -- por isso o OR explícito
+        q = q.filter(or_(Channel.category != ADULT_CATEGORY, Channel.category.is_(None)))
+    return q
 
 
-def _category_counts(db: Session):
+def _category_counts(db: Session, hide_adult: bool = True):
     """[(categoria_ou_CATEGORY_NONE, count)] do maior pro menor, escopado aos
     canais visíveis. Compartilhado entre /channels/categories e /channels/home
     (mesmo padrão de _genre_counts em vod.py)."""
     rows = (
-        _visible_channels_query(db)
+        _visible_channels_query(db, hide_adult=hide_adult)
         .with_entities(Channel.category, func.count(Channel.id))
         .group_by(Channel.category)
         .all()
@@ -68,7 +82,7 @@ def list_channels(
     calculados pra cada um — era isso que deixava a tela de TV ao vivo lenta;
     o filtro por categoria/busca e a paginação ficavam todos no navegador)."""
     response.headers["Cache-Control"] = "public, max-age=120"
-    base = _visible_channels_query(db)
+    base = _visible_channels_query(db, hide_adult=_hide_adult(_access))
     if category == CATEGORY_NONE:
         base = base.filter(Channel.category.is_(None))
     elif category:
@@ -135,7 +149,7 @@ def list_channel_categories(
     return {
         "categories": [
             {"category": c, "label": category_label(None if c == CATEGORY_NONE else c), "count": n}
-            for c, n in _category_counts(db)
+            for c, n in _category_counts(db, hide_adult=_hide_adult(_access))
         ]
     }
 
@@ -171,9 +185,10 @@ def channels_home(
             )
         return out
 
+    hide_adult = _hide_adult(_access)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     live_channels = (
-        _visible_channels_query(db)
+        _visible_channels_query(db, hide_adult=hide_adult)
         .join(Program, Program.channel_id == Channel.id)
         .filter(Program.start_time <= now, Program.end_time > now)
         .order_by(Channel.name)
@@ -182,8 +197,8 @@ def channels_home(
     )
 
     rows = []
-    for cat, _n in _category_counts(db)[:max_categories]:
-        q = _visible_channels_query(db)
+    for cat, _n in _category_counts(db, hide_adult=hide_adult)[:max_categories]:
+        q = _visible_channels_query(db, hide_adult=hide_adult)
         q = q.filter(Channel.category.is_(None)) if cat == CATEGORY_NONE else q.filter(Channel.category == cat)
         channels = q.order_by(Channel.name).limit(per_category).all()
         rows.append({"category": cat, "label": category_label(None if cat == CATEGORY_NONE else cat), "channels": _serialize(channels)})
@@ -208,6 +223,9 @@ def resolve_channel(
     próximo mirror sozinho. Com `?lang=`, só considera os mirrors daquele
     idioma."""
     channel = db.query(Channel).filter(Channel.tvg_id == tvg_id, Channel.is_active.is_(True)).first()
+    # categoria "Adulto" só pro token autorizado -- mesma regra do VOD
+    if channel is not None and channel.category == ADULT_CATEGORY and _hide_adult(_access):
+        channel = None
     if channel is None:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
 
