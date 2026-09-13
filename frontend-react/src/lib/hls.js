@@ -61,7 +61,7 @@ export async function attachHls(video, url, onFatal) {
 // recarregar o MESMO link (video.load(), com um intervalo) antes de
 // considerar fatal de verdade e avisar o mirror seguinte.
 const DIRECT_RETRY_ATTEMPTS = 2;
-const DIRECT_RETRY_DELAY_MS = 2000;
+const DIRECT_RETRY_DELAY_MS = 5000;
 
 function attachDirectRetry(video, onFatal) {
   let retries = 0;
