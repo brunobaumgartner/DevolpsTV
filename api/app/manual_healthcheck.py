@@ -25,7 +25,11 @@ from .models import Stream, VodStream, WorkerRun
 from .stream_validation import stream_is_really_playable
 
 HEALTHCHECK_TIMEOUT_SEC = 6
-HEALTHCHECK_MAX_WORKERS = 15
+# cada mirror bate num servidor DIFERENTE (não é uma API central tipo TMDB) —
+# não existe um rate-limit compartilhado a respeitar, então concorrência alta
+# é segura. Subido de 15 pra 60 em 2026-09-13 pra dar conta de 1M+ mirrors
+# num tempo razoável quando o botão "rodar tudo" é usado.
+HEALTHCHECK_MAX_WORKERS = 60
 
 
 def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, bool]:
@@ -81,12 +85,13 @@ def start_healthcheck_job() -> str:
         db = SessionLocal()
         try:
             streams = db.query(Stream).all()
-            # cap: o catálogo VOD tem centenas de milhares de mirrors; testa um
-            # lote dos mais desatualizados (o botão pode ser clicado de novo)
+            # sem limite: testa TODOS os mirrors VOD, não só um lote — pedido
+            # explícito pra rodar "tudo" de uma vez (2026-09-13). Antes tinha
+            # um cap de 8000 baseado numa estimativa de escala que se provou
+            # muito menor que a real (catálogo tem 1M+ mirrors agora).
             vod_streams = (
                 db.query(VodStream)
                 .order_by(VodStream.last_checked_at.is_(None).desc(), VodStream.last_checked_at.asc())
-                .limit(8000)
                 .all()
             )
             total = len(streams) + len(vod_streams)

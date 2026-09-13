@@ -191,6 +191,42 @@ def admin_list_vod(
     }
 
 
+@router.get("/vod/titles-without-genre")
+def list_titles_without_genre(
+    type: str,  # noqa: A002 - nome claro pro cliente, mesmo sombreando o builtin
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Lista paginada de títulos (filme OU série, conforme `type`) sem gênero —
+    alimenta a tela de classificação manual aberta ao clicar em 'sem gênero'
+    nos gráficos do dashboard. Não inclui os itens/episódios: é só pra
+    escolher o gênero, não pra editar o catálogo (isso já existe em
+    admin.html)."""
+    if type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="type deve ser 'movie' ou 'series'")
+
+    query = db.query(VodTitle).filter(VodTitle.type == type, VodTitle.genre.is_(None))
+    total = query.count()
+    titles = query.order_by(VodTitle.id).offset(offset).limit(min(limit, 200)).all()
+    return {
+        "total": total,
+        "titles": [{"id": t.id, "title": t.title, "year": t.year} for t in titles],
+    }
+
+
+@router.get("/vod/imdb-dataset-status")
+def imdb_dataset_status(_admin: AdminUser = Depends(require_admin)):
+    return {"available": is_dataset_available()}
+
+
+# IMPORTANTE: rotas estáticas tipo /vod/titles-without-genre precisam vir
+# ANTES de /vod/{title_id} — o FastAPI/Starlette casa rotas por ORDEM DE
+# REGISTRO, não pela mais específica primeiro. Uma rota estática de 1
+# segmento registrada DEPOIS de /vod/{title_id} nunca seria alcançada (o
+# {title_id}:int captura o path e só then falha na validação do tipo) —
+# achado real em 2026-09-13 testando /vod/imdb-dataset-status.
 @router.get("/vod/{title_id}")
 def admin_vod_detail(
     title_id: int,
@@ -395,31 +431,6 @@ def update_item(
         item.episode_title = payload.episode_title
     db.commit()
     return {"ok": True}
-
-
-@router.get("/vod/titles-without-genre")
-def list_titles_without_genre(
-    type: str,  # noqa: A002 - nome claro pro cliente, mesmo sombreando o builtin
-    limit: int = 50,
-    offset: int = 0,
-    db: Session = Depends(get_db),
-    _admin: AdminUser = Depends(require_admin),
-):
-    """Lista paginada de títulos (filme OU série, conforme `type`) sem gênero —
-    alimenta a tela de classificação manual aberta ao clicar em 'sem gênero'
-    nos gráficos do dashboard. Não inclui os itens/episódios: é só pra
-    escolher o gênero, não pra editar o catálogo (isso já existe em
-    admin.html)."""
-    if type not in ("movie", "series"):
-        raise HTTPException(status_code=400, detail="type deve ser 'movie' ou 'series'")
-
-    query = db.query(VodTitle).filter(VodTitle.type == type, VodTitle.genre.is_(None))
-    total = query.count()
-    titles = query.order_by(VodTitle.id).offset(offset).limit(min(limit, 200)).all()
-    return {
-        "total": total,
-        "titles": [{"id": t.id, "title": t.title, "year": t.year} for t in titles],
-    }
 
 
 @router.patch("/vod/titles/{title_id}/genre")
@@ -726,11 +737,6 @@ def classify_genres_status(job_id: str, _admin: AdminUser = Depends(require_admi
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado (ou o container reiniciou)")
     return job
-
-
-@router.get("/vod/imdb-dataset-status")
-def imdb_dataset_status(_admin: AdminUser = Depends(require_admin)):
-    return {"available": is_dataset_available()}
 
 
 @router.post("/vod/classify-genres-imdb")
