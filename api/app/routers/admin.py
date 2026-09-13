@@ -31,7 +31,7 @@ from ..import_vod import get_import_job, start_import_job
 from ..import_channels import get_import_job as get_import_channels_job, start_import_job as start_import_channels_job
 from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle, WorkerRun
-from ..system_info import snapshot as system_snapshot
+from ..system_info import snapshot as system_snapshot, top_processes
 from ..vod_mirrors import upsert_mirror
 
 router = APIRouter(prefix="/admin")
@@ -878,6 +878,16 @@ def system_cancel_job(job_id: str, _admin: AdminUser = Depends(require_admin)):
 @router.get("/system/resources")
 def system_resources(_admin: AdminUser = Depends(require_admin)):
     return system_snapshot()
+
+
+@router.get("/system/os-processes")
+def system_os_processes(_admin: AdminUser = Depends(require_admin)):
+    """Processos reais do SO visíveis no container da API (inclui qualquer
+    `docker exec` rodando aqui, como importações de CSV via CLI) — diferente
+    de /system/jobs, que só rastreia o que foi disparado pela tela web. Não
+    enxerga outros containers (mysql, worker): sem `pid: host`, cada
+    container tem seu próprio namespace de PID (decisão deliberada)."""
+    return {"processes": top_processes()}
 
 
 # ---------- tela "Banco": consulta somente-leitura ----------

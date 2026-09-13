@@ -34,14 +34,54 @@ import csv
 import io
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import tuple_
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload
 
 from .db import SessionLocal
 from .models import VodItem, VodTitle
 from .vod_mirrors import upsert_mirror
+
+# codigos de erro do MySQL pra "outro processo brigou pela mesma linha" —
+# deadlock (1213) e timeout de lock (1205). Não é bug, é esperado quando o
+# health-check (ou outro import) mexe nas mesmas tabelas ao mesmo tempo —
+# a prática padrão é tentar a transação inteira de novo, não desistir.
+_RETRYABLE_ERRNOS = {1213, 1205}
+_MAX_RETRIES = 4
+
+
+def _run_with_deadlock_retry(rows, db, on_progress=None) -> dict:
+    """Roda `_import_rows` + commit, tentando de novo do zero se o MySQL
+    abortar a transação por deadlock/lock-timeout. Achado real em 2026-09-13:
+    health-check manual + esta importação rodando ao mesmo tempo derrubaram 4
+    arquivos seguidos (cada um perdendo TODO o trabalho, já que é 1 transação
+    só por arquivo) — sem isso, um pico de concorrência qualquer no futuro
+    (ex: vários usuários reais navegando) perderia importações inteiras."""
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            stats = _import_rows(rows, db, on_progress=on_progress)
+            db.commit()
+            return stats
+        except OperationalError as e:
+            db.rollback()
+            errno = e.orig.args[0] if e.orig and e.orig.args else None
+            if errno not in _RETRYABLE_ERRNOS or attempt == _MAX_RETRIES:
+                raise
+            time.sleep(attempt * 2)  # backoff: 2s, 4s, 6s...
+
+
+# tamanho do lote pro IN(...) do preload em massa — evita 1 query gigante
+# numa importação com dezenas de milhares de títulos distintos
+_PRELOAD_CHUNK = 2000
+
+
+def _chunks(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
 
 REQUIRED_COLUMNS = {"type", "title"}
 VALID_TYPES = {"movie", "series"}
@@ -69,20 +109,71 @@ def _clean_int(value):
         return None
 
 
+def _preload_titles(db, rows) -> dict[tuple[str, str], VodTitle]:
+    """1 (ou poucas) consulta(s) pra achar TODOS os títulos do arquivo que já
+    existem no banco, em vez de 1 SELECT por linha nova. Achado real: era o
+    maior gargalo da importação (cada linha nova fazia SELECT + INSERT +
+    flush só pra confirmar que era mesmo novo)."""
+    wanted = {
+        (_clean(r.get("type")), _clean(r.get("title")))
+        for r in rows
+        if _clean(r.get("type")) in VALID_TYPES and _clean(r.get("title"))
+    }
+    if not wanted:
+        return {}
+    wanted = list(wanted)
+    found: dict[tuple[str, str], VodTitle] = {}
+    for chunk in _chunks(wanted, _PRELOAD_CHUNK):
+        rows_found = (
+            db.query(VodTitle)
+            .filter(tuple_(VodTitle.type, VodTitle.title).in_(chunk))
+            .all()
+        )
+        for t in rows_found:
+            found[(t.type, t.title)] = t
+    return found
+
+
+def _preload_items(db, title_cache: dict[tuple, VodTitle]) -> dict[tuple, dict[tuple, VodItem]]:
+    """Idem, pros itens dos títulos que JÁ existiam (título novo não tem itens
+    ainda, óbvio) — 1 consulta pra todos em vez de 1 por título."""
+    existing_ids = [t.id for t in title_cache.values() if t.id is not None]
+    if not existing_ids:
+        return {}
+    id_to_key = {t.id: key for key, t in title_cache.items()}
+    result: dict[tuple, dict[tuple, VodItem]] = {}
+    for chunk in _chunks(existing_ids, _PRELOAD_CHUNK):
+        items = (
+            db.query(VodItem)
+            .options(joinedload(VodItem.streams))
+            .filter(VodItem.title_id.in_(chunk))
+            .all()
+        )
+        for it in items:
+            key = id_to_key[it.title_id]
+            result.setdefault(key, {})[(it.season_number, it.episode_number)] = it
+    return result
+
+
 def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
     """Núcleo da importação, reutilizado pela CLI e pelo job de upload.
     `rows` já vem parseado (csv.DictReader). Não abre/fecha a sessão do banco —
     quem chama decide o ciclo de vida da `db`.
 
-    Otimização importante: os itens (episódios/filme) de cada título são
-    carregados em memória de uma vez só na primeira vez que o título é tocado
-    nessa importação, em vez de 1 consulta ao banco por LINHA do CSV. Pra um
-    CSV de alguns milhares de linhas, isso é a diferença entre alguns segundos
-    e vários minutos (achado real testando um CSV de 30MB/15000 linhas)."""
+    Otimização importante: título e itens já existentes são carregados em
+    lote ANTES do loop (`_preload_titles`/`_preload_items`), não 1 consulta
+    por linha — pra um CSV com dezenas de milhares de linhas isso é a
+    diferença entre minutos e segundos (achado real em 2026-09-13: ~6-7min
+    por arquivo de ~15-20mil linhas, majoritariamente esperando ida-e-volta
+    no banco). Título/item novo entra via `parent.filhos.append(...)` (o
+    relacionamento do SQLAlchemy resolve a FK sozinho no flush final), nunca
+    via `db.flush()` manual no meio do loop — cada flush explícito é uma
+    viagem extra ao banco, e a única coisa que ele garantia (o ID do pai) o
+    relacionamento já resolve de graça."""
     stats = {"titulos_novos": 0, "titulos_atualizados": 0, "itens_novos": 0, "itens_atualizados": 0, "linhas_ignoradas": []}
-    title_cache: dict[tuple[str, str], VodTitle] = {}
-    # title_id -> {(season, episode): VodItem} — carregado 1x por título, não por linha
-    items_cache: dict[int, dict[tuple, VodItem]] = {}
+
+    title_cache = _preload_titles(db, rows)
+    items_cache = _preload_items(db, title_cache)
 
     total = len(rows)
     for i, row in enumerate(rows, start=2):  # linha 1 é o cabeçalho
@@ -98,8 +189,6 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
 
         key = (vod_type, title_name)
         vod_title = title_cache.get(key)
-        if vod_title is None:
-            vod_title = db.query(VodTitle).filter(VodTitle.type == vod_type, VodTitle.title == title_name).first()
 
         description = _clean(row.get("description"))
         poster_url = _clean(row.get("poster_url"))
@@ -111,9 +200,9 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
                 type=vod_type, title=title_name, description=description, poster_url=poster_url, genre=genre, year=year
             )
             db.add(vod_title)
-            db.flush()  # garante vod_title.id pros itens abaixo
             stats["titulos_novos"] += 1
-            items_cache[vod_title.id] = {}
+            title_cache[key] = vod_title
+            items_cache[key] = {}
         else:
             changed = False
             for field, value in (("description", description), ("poster_url", poster_url), ("genre", genre), ("year", year)):
@@ -123,35 +212,19 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             if changed:
                 stats["titulos_atualizados"] += 1
 
-        title_cache[key] = vod_title
-
-        if vod_title.id not in items_cache:
-            existing_items = (
-                db.query(VodItem)
-                .options(joinedload(VodItem.streams))
-                .filter(VodItem.title_id == vod_title.id)
-                .all()
-            )
-            items_cache[vod_title.id] = {(it.season_number, it.episode_number): it for it in existing_items}
-
         season = _clean_int(row.get("season_number"))
         episode = _clean_int(row.get("episode_number"))
         episode_title = _clean(row.get("episode_title"))
         stream_url = _clean(row.get("stream_url"))
 
         item_key = (season, episode)
-        item = items_cache[vod_title.id].get(item_key)
+        title_items = items_cache.setdefault(key, {})
+        item = title_items.get(item_key)
         if item is None:
-            item = VodItem(
-                title_id=vod_title.id,
-                season_number=season,
-                episode_number=episode,
-                episode_title=episode_title,
-            )
-            db.add(item)
-            db.flush()  # garante item.id pro mirror abaixo
+            item = VodItem(season_number=season, episode_number=episode, episode_title=episode_title)
+            vod_title.items.append(item)  # FK resolvida pelo relacionamento, sem flush
             upsert_mirror(db, item, stream_url)
-            items_cache[vod_title.id][item_key] = item
+            title_items[item_key] = item
             stats["itens_novos"] += 1
         else:
             changed = False
@@ -191,9 +264,7 @@ def import_rows_from_text(text: str) -> dict:
 
     db = SessionLocal()
     try:
-        stats = _import_rows(rows, db)
-        db.commit()
-        return stats
+        return _run_with_deadlock_retry(rows, db)
     except Exception:
         db.rollback()
         raise
@@ -236,8 +307,7 @@ def start_import_job(text: str) -> str:
     def _worker():
         db = SessionLocal()
         try:
-            stats = _import_rows(rows, db, on_progress=_on_progress)
-            db.commit()
+            stats = _run_with_deadlock_retry(rows, db, on_progress=_on_progress)
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["stats"] = stats
@@ -274,8 +344,7 @@ def import_csv(path: str):
 
     db = SessionLocal()
     try:
-        stats = _import_rows(rows, db)
-        db.commit()
+        stats = _run_with_deadlock_retry(rows, db)
     except Exception:
         db.rollback()
         raise

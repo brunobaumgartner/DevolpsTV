@@ -42,6 +42,18 @@ import requests
 
 _MAX_MANIFEST_BYTES = 64 * 1024
 
+# Causa raiz #6 (confirmada 2026-09-13): sem User-Agent nenhum (o default do
+# python-requests, tipo "python-requests/2.x"), vários provedores devolvem
+# 403 na hora — mesmo em links de vídeo reais e saudáveis (confirmado com um
+# .mp4 de ~2GB que só funciona com User-Agent de navegador). Isso zerava
+# TODO o health-check de VOD (nenhum item tem user_agent próprio configurado,
+# diferente de canal). Usa um UA de navegador comum como padrão sempre que o
+# chamador não define um específico.
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
 # cada pacote MPEG-TS começa com o "sync byte" 0x47 a cada 188 bytes — checar
 # se ele se repete é o jeito padrão de reconhecer um transport stream bruto
 # sem depender só do Content-Type (que varia muito entre servidores de IPTV:
@@ -104,8 +116,9 @@ def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | Non
     final importa: encurtadores tipo jmp2.uk fazem 302 pra outro host, e as
     variantes relativas do m3u8 têm que ser resolvidas contra ela, não contra
     a original."""
+    final_headers = {"User-Agent": _DEFAULT_USER_AGENT, **(headers or {})}
     try:
-        with requests.get(url, headers=headers, timeout=timeout, stream=True) as resp:
+        with requests.get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
             if resp.status_code >= 400:
                 return None
             return resp.headers.get("Content-Type"), _read_bounded(resp), str(resp.url)

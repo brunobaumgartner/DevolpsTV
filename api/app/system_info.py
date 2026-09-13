@@ -49,6 +49,72 @@ def _meminfo() -> dict:
     return out
 
 
+def _pid_cpu_ticks(pid: str) -> int | None:
+    stat = _read(f"/proc/{pid}/stat")
+    if not stat:
+        return None
+    # campos 14 (utime) e 15 (stime) de /proc/pid/stat, em jiffies — o comm
+    # (campo 2) pode ter espaço/parênteses, então localiza pelo último ")"
+    # antes de separar o resto (o que sobra começa no campo 3 = índice 0)
+    tail = stat[stat.rfind(")") + 1 :].split()
+    try:
+        return int(tail[11]) + int(tail[12])  # campos 14 e 15 = índices 11 e 12 depois do corte
+    except (IndexError, ValueError):
+        return None
+
+
+def _pid_cmdline(pid: str) -> str | None:
+    raw = _read(f"/proc/{pid}/cmdline")
+    if not raw:
+        # kernel thread ou processo sem cmdline (zumbi) — usa o comm entre parênteses do stat
+        stat = _read(f"/proc/{pid}/stat")
+        if stat and "(" in stat and ")" in stat:
+            return "[" + stat[stat.find("(") + 1 : stat.rfind(")")] + "]"
+        return None
+    return raw.replace("\x00", " ").strip() or None
+
+
+def _pid_rss_bytes(pid: str) -> int:
+    for ln in _read(f"/proc/{pid}/status").splitlines():
+        if ln.startswith("VmRSS:"):
+            parts = ln.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1]) * 1024
+    return 0
+
+
+def top_processes(limit: int = 12, sample: float = 0.3) -> list[dict]:
+    """Processos visíveis DENTRO do container da API (mesmo namespace de PID),
+    ordenados por CPU — inclui a própria API e qualquer `docker exec` rodando
+    aqui dentro (ex: importações de CSV via CLI), que não aparecem na lista de
+    jobs (essa só rastreia o que foi disparado pela tela web). NÃO enxerga
+    outros containers (mysql, worker) — isolamento normal de PID namespace,
+    sem `pid: host` no compose (decisão deliberada, ver ARQUITETURA.md)."""
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return []
+
+    clk_tck = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+    before = {p: _pid_cpu_ticks(p) for p in pids}
+    time.sleep(sample)
+
+    rows = []
+    for p in pids:
+        after = _pid_cpu_ticks(p)
+        b = before.get(p)
+        if after is None or b is None or after < b:
+            continue
+        cpu_pct = round(100.0 * ((after - b) / clk_tck) / sample, 1)
+        cmd = _pid_cmdline(p)
+        if not cmd:
+            continue
+        rows.append({"pid": int(p), "cmd": cmd[:200], "cpu_percent": cpu_pct, "mem_bytes": _pid_rss_bytes(p)})
+
+    rows.sort(key=lambda r: -r["cpu_percent"])
+    return rows[:limit]
+
+
 def snapshot() -> dict:
     mi = _meminfo()
     total = mi.get("MemTotal", 0)

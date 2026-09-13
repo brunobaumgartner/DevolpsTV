@@ -104,6 +104,7 @@ export const adminApi = {
   systemJobs: () => req("admin/system/jobs"),
   cancelJob: (id) => jpost(`admin/system/jobs/${id}/cancel`),
   systemResources: () => req("admin/system/resources"),
+  systemOsProcesses: () => req("admin/system/os-processes"),
 
   // banco (consulta somente-leitura)
   dbTables: () => req("admin/db/tables"),

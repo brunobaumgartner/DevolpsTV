@@ -29,7 +29,10 @@ def upsert_mirror(db: Session, item: VodItem, url: str | None) -> bool:
     if existing is not None:
         return False
 
-    db.add(VodStream(item_id=item.id, url=url))
+    # via relacionamento (não db.add com item.id direto): funciona mesmo se o
+    # item ainda nem foi flushado (id ainda None) — o SQLAlchemy resolve a FK
+    # sozinho no flush final, economizando uma ida ao banco por item novo.
+    item.streams.append(VodStream(url=url))
     if item.stream_url is None:
         item.stream_url = url
     return True

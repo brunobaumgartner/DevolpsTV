@@ -23,8 +23,11 @@ coluna):
 import csv
 import io
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
+
+from sqlalchemy.exc import OperationalError
 
 from .db import SessionLocal
 from .models import Channel, Stream
@@ -32,6 +35,27 @@ from .models import Channel, Stream
 REQUIRED_COLUMNS = {"tvg_id", "stream_url"}
 _TRUE_VALUES = {"1", "true", "sim", "yes"}
 _PROGRESS_EVERY = 25
+
+# mesma lógica do import_vod.py: deadlock (1213) e lock-timeout (1205) do
+# MySQL são esperados quando outro processo (health-check, outro import) mexe
+# nas mesmas tabelas ao mesmo tempo — tenta a transação inteira de novo em
+# vez de perder o arquivo todo (achado real em 2026-09-13).
+_RETRYABLE_ERRNOS = {1213, 1205}
+_MAX_RETRIES = 4
+
+
+def _run_with_deadlock_retry(rows, db, on_progress=None) -> dict:
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            stats = _import_rows(rows, db, on_progress=on_progress)
+            db.commit()
+            return stats
+        except OperationalError as e:
+            db.rollback()
+            errno = e.orig.args[0] if e.orig and e.orig.args else None
+            if errno not in _RETRYABLE_ERRNOS or attempt == _MAX_RETRIES:
+                raise
+            time.sleep(attempt * 2)
 
 
 def _clean(value):
@@ -46,11 +70,47 @@ def _clean_bool(value):
     return bool(value) and value.lower() in _TRUE_VALUES
 
 
+_PRELOAD_CHUNK = 2000
+
+
+def _chunks(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+def _preload_channels(db, rows) -> dict[str, Channel]:
+    """1 (ou poucas) consulta(s) pra achar todos os canais do arquivo que já
+    existem, em vez de 1 SELECT por linha nova (mesma otimização do
+    import_vod.py — achado real em 2026-09-13)."""
+    wanted = {_clean(r.get("tvg_id")) for r in rows if _clean(r.get("tvg_id"))}
+    if not wanted:
+        return {}
+    wanted = list(wanted)
+    found: dict[str, Channel] = {}
+    for chunk in _chunks(wanted, _PRELOAD_CHUNK):
+        for c in db.query(Channel).filter(Channel.tvg_id.in_(chunk)).all():
+            found[c.tvg_id] = c
+    return found
+
+
+def _preload_streams(db, channel_cache: dict[str, Channel]) -> dict[str, dict[str, Stream]]:
+    """Idem, pros streams dos canais que JÁ existiam."""
+    existing_ids = [c.id for c in channel_cache.values() if c.id is not None]
+    if not existing_ids:
+        return {}
+    id_to_tvg = {c.id: tvg for tvg, c in channel_cache.items()}
+    result: dict[str, dict[str, Stream]] = {}
+    for chunk in _chunks(existing_ids, _PRELOAD_CHUNK):
+        for s in db.query(Stream).filter(Stream.channel_id.in_(chunk)).all():
+            result.setdefault(id_to_tvg[s.channel_id], {})[s.url] = s
+    return result
+
+
 def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
     stats = {"canais_novos": 0, "canais_atualizados": 0, "links_novos": 0, "linhas_ignoradas": []}
-    channel_cache: dict[str, Channel] = {}
-    # channel_id -> {url: Stream} — carregado 1x por canal, não por linha
-    streams_cache: dict[int, dict[str, Stream]] = {}
+
+    channel_cache = _preload_channels(db, rows)
+    streams_cache = _preload_streams(db, channel_cache)
 
     total = len(rows)
     for i, row in enumerate(rows, start=2):  # linha 1 é o cabeçalho
@@ -64,8 +124,6 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             continue
 
         channel = channel_cache.get(tvg_id)
-        if channel is None:
-            channel = db.query(Channel).filter(Channel.tvg_id == tvg_id).first()
 
         name = _clean(row.get("name"))
         category = _clean(row.get("category"))
@@ -80,10 +138,10 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
                 tvg_id=tvg_id, name=name, category=category, logo_url=logo_url,
                 is_broadcast_tv=is_broadcast_tv, is_active=True,
             )
-            db.add(channel)
-            db.flush()  # garante channel.id pro stream abaixo
+            db.add(channel)  # sem flush: FK do stream resolvida via relacionamento abaixo
             stats["canais_novos"] += 1
-            streams_cache[channel.id] = {}
+            channel_cache[tvg_id] = channel
+            streams_cache[tvg_id] = {}
         else:
             changed = False
             if name and channel.name != name:
@@ -101,16 +159,11 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             if changed:
                 stats["canais_atualizados"] += 1
 
-        channel_cache[tvg_id] = channel
-
-        if channel.id not in streams_cache:
-            existing = db.query(Stream).filter(Stream.channel_id == channel.id).all()
-            streams_cache[channel.id] = {s.url: s for s in existing}
-
-        if stream_url not in streams_cache[channel.id]:
-            stream = Stream(channel_id=channel.id, url=stream_url)
-            db.add(stream)
-            streams_cache[channel.id][stream_url] = stream
+        channel_streams = streams_cache.setdefault(tvg_id, {})
+        if stream_url not in channel_streams:
+            stream = Stream(url=stream_url)
+            channel.streams.append(stream)  # FK resolvida pelo relacionamento, sem flush
+            channel_streams[stream_url] = stream
             stats["links_novos"] += 1
 
     if on_progress:
@@ -155,8 +208,7 @@ def start_import_job(text: str) -> str:
     def _worker():
         db = SessionLocal()
         try:
-            stats = _import_rows(rows, db, on_progress=_on_progress)
-            db.commit()
+            stats = _run_with_deadlock_retry(rows, db, on_progress=_on_progress)
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["stats"] = stats

@@ -63,11 +63,13 @@ function Meter({ label, pct, detail }) {
 export function AdminSystem() {
   const [res, setRes] = useState(null);
   const [jobs, setJobs] = useState(null);
+  const [osProcs, setOsProcs] = useState(null);
   const [busy, setBusy] = useState(null);
 
   const load = () => {
     adminApi.systemResources().then(setRes).catch(() => {});
     adminApi.systemJobs().then(setJobs).catch(() => {});
+    adminApi.systemOsProcesses().then(setOsProcs).catch(() => {});
   };
   useEffect(() => {
     load();
@@ -182,6 +184,47 @@ export function AdminSystem() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="Processos do sistema (container da API)"
+        right={<span class="text-[11px] text-muted">todo processo, não só os da tela web</span>}
+      >
+        {!osProcs ? (
+          <div class="text-muted text-sm">Carregando…</div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs" style="min-width:520px">
+              <thead>
+                <tr class="text-muted">
+                  <th class="text-left font-normal pb-1">PID</th>
+                  <th class="text-left font-normal pb-1">Comando</th>
+                  <th class="text-right font-normal pb-1">CPU</th>
+                  <th class="text-right font-normal pb-1">Memória</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(osProcs.processes || []).length === 0 && (
+                  <tr>
+                    <td colSpan="4" class="text-muted py-2">Nenhum processo (raro — pelo menos a própria API deveria aparecer).</td>
+                  </tr>
+                )}
+                {(osProcs.processes || []).map((p) => (
+                  <tr class="border-t border-border/60">
+                    <td class="py-1.5 pr-3 text-muted whitespace-nowrap">{p.pid}</td>
+                    <td class="py-1.5 pr-3 text-text max-w-[420px] truncate" title={p.cmd}>{p.cmd}</td>
+                    <td class="py-1.5 pl-3 text-right whitespace-nowrap">{p.cpu_percent}%</td>
+                    <td class="py-1.5 pl-3 text-muted text-right whitespace-nowrap">{fmtBytes(p.mem_bytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p class="text-[11px] text-muted mt-2">
+              Só enxerga o que roda dentro do container da API (inclui importações via linha de comando) — não vê o
+              banco nem o worker, que rodam em containers separados.
+            </p>
           </div>
         )}
       </Panel>

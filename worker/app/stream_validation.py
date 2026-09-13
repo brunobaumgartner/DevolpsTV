@@ -36,6 +36,14 @@ header `Content-Type: video/mp4` mentindo. O Firefox recusa tocar (corpo não
 aprovava os dois como "saudável". Agora exige um tamanho mínimo de corpo
 antes de confiar no Content-Type — nenhum vídeo de verdade cabe em <4KB.
 
+Causa raiz #6 (confirmada 2026-09-13): sem User-Agent nenhum (o default do
+python-requests, tipo "python-requests/2.x"), vários provedores devolvem 403
+na hora — mesmo em links de vídeo reais e saudáveis (confirmado com um .mp4
+de ~2GB que só funciona com User-Agent de navegador). Isso zerava TODO o
+health-check de VOD (nenhum item tem user_agent próprio configurado,
+diferente de canal). Usa um UA de navegador comum como padrão sempre que o
+chamador não define um específico.
+
 Cópia da lógica de api/app/stream_validation.py — duplicada de propósito
 porque API e worker são serviços/imagens Docker separados (ver ARQUITETURA.md
 seção 6). Qualquer correção aqui precisa ser espelhada lá.
@@ -61,6 +69,11 @@ _TS_PACKETS_TO_CHECK = 8
 # do limite é sinal de página de erro disfarçada de vídeo (Content-Type
 # mentindo), não vídeo de verdade
 _MIN_MEDIA_BYTES = 4096
+
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 
 def _read_bounded(resp: requests.Response) -> bytes:
@@ -114,8 +127,9 @@ def _get_body(url: str, timeout: float, headers: dict | None) -> tuple[str | Non
     senão (Content-Type, corpo bruto, URL FINAL depois de redirects). A URL
     final importa: encurtadores tipo jmp2.uk fazem 302 pra outro host, e as
     variantes relativas do m3u8 têm que ser resolvidas contra ela."""
+    final_headers = {"User-Agent": _DEFAULT_USER_AGENT, **(headers or {})}
     try:
-        with requests.get(url, headers=headers, timeout=timeout, stream=True) as resp:
+        with requests.get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
             if resp.status_code >= 400:
                 return None
             return resp.headers.get("Content-Type"), _read_bounded(resp), str(resp.url)
