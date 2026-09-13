@@ -9,7 +9,7 @@ const goChannel = (c) => navigate(`/assistir/canal/${encodeURIComponent(c.tvg_id
 const goVod = (t) => navigate(`/assistir/${t.type === "series" ? "serie" : "filme"}/${t.id}`);
 
 export function Home() {
-  const channels = useFetch("channels", () => api.channels());
+  const channelsHome = useFetch("channels-home", () => api.channelsHome(20)); // 1 request pras fileiras de canais
   const home = useFetch("vod-home", () => api.vodHome(15)); // 1 request pras fileiras de VOD
 
   // "Continuar assistindo" — sempre revalida ao voltar pra Home (some quando acaba)
@@ -21,10 +21,9 @@ export function Home() {
       .catch(() => {});
   }, []);
 
-  const chList = channels.data?.channels || [];
-  const liveNow = chList.filter((c) => c.now_playing).slice(0, 20);
-  const liveRow = liveNow.length ? liveNow : chList.slice(0, 20);
-  const cats = [...new Set(chList.map((c) => c.category_label || "Outros"))].slice(0, 6);
+  const liveNow = channelsHome.data?.live_now || [];
+  const channelRows = channelsHome.data?.rows || [];
+  const liveRow = liveNow.length ? liveNow : (channelRows[0]?.channels || []);
 
   const channelCard = (c) => (
     <Card kind="channel" title={c.name} image={c.logo_url} subtitle={c.now_playing?.title} onClick={() => goChannel(c)} />
@@ -62,13 +61,8 @@ export function Home() {
         <Row title="Agora na TV" onSeeAll={() => navigate("/tv")} load={async () => liveRow} renderItem={channelCard} />
       )}
 
-      {cats.map((cat) => (
-        <Row
-          title={cat}
-          onSeeAll={() => navigate("/tv")}
-          load={async () => chList.filter((c) => (c.category_label || "Outros") === cat).slice(0, 20)}
-          renderItem={channelCard}
-        />
+      {channelRows.map((r) => (
+        <Row title={r.label} onSeeAll={() => navigate("/tv")} load={async () => r.channels} renderItem={channelCard} />
       ))}
 
       {(home.data?.rows || []).map((r) => (

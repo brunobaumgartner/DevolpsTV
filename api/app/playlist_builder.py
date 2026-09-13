@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
 from .models import Channel, Stream
@@ -27,16 +26,35 @@ def _is_client_suppressed(stream) -> bool:
 def rank_mirrors(candidates):
     """Ordena uma lista de mirrors (objetos com `is_healthy`,
     `consecutive_failures`, `last_checked_at`, `client_failed_at` — `Stream`
-    ou `VodStream`) do melhor pro pior, descartando os não-saudáveis e os
-    suprimidos por falha real recente reportada pelo navegador. Genérico pra
-    ser reaproveitado pelo VOD (`vod_mirrors.py`) sem duplicar a regra de
-    ranking já usada pelos canais ao vivo."""
-    healthy = [s for s in candidates if s.is_healthy and not _is_client_suppressed(s)]
-    if not healthy:
+    ou `VodStream`) do melhor pro pior. Genérico pra ser reaproveitado pelo
+    VOD (`vod_mirrors.py`) sem duplicar a regra de ranking já usada pelos
+    canais ao vivo.
+
+    IMPORTANTE (mudança de 2026-09-13): `is_healthy` NÃO é mais filtro de
+    exclusão, só critério de ORDEM. Achado real: o health-check roda do IP
+    da VPS, e vários provedores de IPTV bloqueiam especificamente IP de
+    datacenter — redirecionam pra conteúdo de verdade só quando quem pede é
+    um IP residencial (confirmado comparando a mesma URL da VPS vs de uma
+    rede doméstica: a VPS recebia uma página de erro disfarçada, a rede
+    doméstica pegava o vídeo real). Ou seja, o teste do servidor tem
+    falso-negativo sistemático — se ele virasse filtro, esconderia conteúdo
+    que funciona perfeitamente pro usuário de verdade. A única exclusão que
+    resta é `client_failed_at`: reportado pelo NAVEGADOR de um usuário real
+    tentando tocar, esse sim reflete o que importa."""
+    usable = [s for s in candidates if not _is_client_suppressed(s)]
+    if not usable:
         return []
+
+    def health_rank(s):
+        if s.is_healthy is True:
+            return 0  # servidor confirmou -- tenta primeiro
+        if s.is_healthy is None:
+            return 1  # nunca testado -- tenta antes de um confirmado ruim
+        return 2  # servidor marcou ruim -- ainda tentável (pode ser falso-negativo), mas por último
+
     fallback = datetime(2000, 1, 1)
-    healthy.sort(key=lambda s: (s.consecutive_failures, -(s.last_checked_at or fallback).timestamp()))
-    return healthy
+    usable.sort(key=lambda s: (health_rank(s), s.consecutive_failures, -(s.last_checked_at or fallback).timestamp()))
+    return usable
 
 
 def _ranked_streams(channel: Channel):
@@ -54,11 +72,17 @@ def _best_stream(channel: Channel):
 def _active_channels(db: Session):
     # joinedload dos streams: sem isso cada canal disparava 1 SELECT lazy dos
     # próprios streams (N+1) — ~250 queries a mais por chamada de channels.json
+    #
+    # Filtro simplificado (2026-09-13): exige só ter algum stream cadastrado,
+    # não mais "is_healthy=True" — ver o comentão em rank_mirrors() pro
+    # motivo (falso-negativo do health-check rodando de IP de datacenter).
+    # Quem realmente decide se aparece "tocável" é o rank_mirrors() na hora
+    # do /resolve, que só exclui suprimido por falha real do navegador.
     return (
         db.query(Channel)
         .options(joinedload(Channel.streams))
         .filter(Channel.is_active.is_(True))
-        .filter(Channel.streams.any(and_(Stream.is_healthy.is_(True))))
+        .filter(Channel.streams.any())
         .order_by(Channel.category, Channel.name)
         .all()
     )
@@ -103,18 +127,6 @@ def ranked_streams_by_language(channel: Channel, max_mirrors: int = 3) -> list[d
         groups.setdefault(_stream_lang(s), []).append(s.url)
     ordered = sorted(groups.items(), key=lambda kv: (_LANG_ORDER.get(kv[0], 2), kv[0]))
     return [{"label": label, "stream_urls": urls[:max_mirrors]} for label, urls in ordered]
-
-
-def active_channels_with_all_streams(db: Session, max_mirrors: int = 3):
-    """Igual a active_channels_with_stream, mas traz até `max_mirrors` streams saudáveis
-    por canal (do melhor pro pior) — usado pro frontend tentar o próximo mirror
-    automaticamente se o primeiro falhar na hora de reproduzir."""
-    result = []
-    for ch in _active_channels(db):
-        ranked = _ranked_streams(ch)[:max_mirrors]
-        if ranked:
-            result.append((ch, ranked))
-    return result
 
 
 def build_m3u(db: Session) -> str:

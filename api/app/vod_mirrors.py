@@ -38,20 +38,27 @@ def upsert_mirror(db: Session, item: VodItem, url: str | None) -> bool:
     return True
 
 
-def item_has_healthy_mirror(item: VodItem) -> bool:
-    """True se pelo menos 1 mirror do item já passou no health-check. Usado
-    pra decidir se o episódio/filme aparece como "disponível" — critério mais
-    forte que só "tem link cadastrado" (ver ARQUITETURA: título só some da
-    listagem quando NENHUM mirror de NENHUM item estiver saudável)."""
-    return any(s.is_healthy for s in item.streams)
+def item_is_available(item: VodItem) -> bool:
+    """Disponível = tem pelo menos 1 link cadastrado.
+
+    Antes exigia "passou no health-check do servidor" — revertido em
+    2026-09-13: o health-check roda do IP da VPS, e provedores que bloqueiam
+    IP de datacenter (comum em fontes de IPTV pirata) fazem o teste do
+    servidor dar falso-negativo sistemático, mesmo quando o link funciona
+    perfeitamente pro navegador do usuário real (confirmado comparando a
+    mesma URL da VPS vs de uma rede residencial). A validação de verdade
+    agora acontece no navegador, na hora de tocar — ver rank_mirrors()."""
+    return bool(item.streams) or item.stream_url is not None
 
 
 def ranked_mirror_urls(item: VodItem, max_mirrors: int = 5) -> list[str]:
-    """URLs dos mirrors saudáveis do item, do melhor pro pior. Cai de volta pro
-    `stream_url` legado se o item ainda não tem nenhuma linha em `vod_streams`
-    (dado importado antes dessa tabela existir e que o health-check ainda não
-    migrou)."""
-    ranked = rank_mirrors(item.streams)
-    if ranked:
-        return [s.url for s in ranked[:max_mirrors]]
-    return [item.stream_url] if item.stream_url else []
+    """URLs dos mirrors do item, do melhor pro pior (ranking, não filtro —
+    ver rank_mirrors()). Cai de volta pro `stream_url` legado só quando o item
+    não tem NENHUMA linha em `vod_streams` ainda (dado importado antes dessa
+    tabela existir) — se tem linhas mas todas saíram do ranking (suprimidas
+    por falha reportada pelo navegador), o resultado certo é lista vazia, não
+    o link legado por baixo do pano (senão a supressão do cliente não valeria
+    nada)."""
+    if not item.streams:
+        return [item.stream_url] if item.stream_url else []
+    return [s.url for s in rank_mirrors(item.streams)[:max_mirrors]]

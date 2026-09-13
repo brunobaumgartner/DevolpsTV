@@ -28,7 +28,12 @@ from .job_registry import is_cancelled, register
 from .models import VodTitle
 
 _TMDB_SEARCH = "https://api.themoviedb.org/3/search/{kind}"
-_TMDB_IMG = "https://image.tmdb.org/t/p/w342{path}"
+# w185: o card do catálogo renderiza o pôster a 150-180px (ver Card.jsx/
+# index.css) — w342 (usado antes) baixava quase o dobro do necessário, custo
+# real de dado móvel sem ganho visível nesse tamanho de tela. Backdrop
+# continua grande (w780) porque é usado full-width na tela de detalhe, só 1
+# vez por título visto, onde a qualidade compensa o custo.
+_TMDB_IMG = "https://image.tmdb.org/t/p/w185{path}"
 _TMDB_BACKDROP = "https://image.tmdb.org/t/p/w780{path}"
 _IMDB_SUGGEST = "https://v2.sg.media-imdb.com/suggestion/{key}/{query}.json"
 _TIMEOUT = 12

@@ -1,17 +1,17 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
 from ..categories_pt import category_label
 from ..epg import now_playing_map, upcoming_programs
-from ..live_check import resolve_live_url
-from ..models import AccessToken, Channel, Stream
+from ..models import AccessToken, Channel, Program, Stream
 from ..playlist_builder import (
-    active_channels_with_all_streams,
+    _ranked_streams,
     ranked_stream_urls,
     ranked_streams_by_language,
 )
@@ -19,9 +19,37 @@ from ..security import require_valid_token
 
 router = APIRouter()
 
+# valor especial no filtro de categoria pra "canais sem categoria"
+CATEGORY_NONE = "Sem categoria"
+
 
 class FailureReport(BaseModel):
     url: str
+
+
+def _visible_channels_query(db: Session):
+    """Canais que aparecem na listagem: ativos e com pelo menos 1 stream
+    cadastrado (mesmo critério de active_channels_with_all_streams, mas sem
+    trazer os streams — usado tanto pra paginar quanto pra contar categorias
+    sem carregar o catálogo inteiro)."""
+    return db.query(Channel).filter(Channel.is_active.is_(True)).filter(Channel.streams.any())
+
+
+def _category_counts(db: Session):
+    """[(categoria_ou_CATEGORY_NONE, count)] do maior pro menor, escopado aos
+    canais visíveis. Compartilhado entre /channels/categories e /channels/home
+    (mesmo padrão de _genre_counts em vod.py)."""
+    rows = (
+        _visible_channels_query(db)
+        .with_entities(Channel.category, func.count(Channel.id))
+        .group_by(Channel.category)
+        .all()
+    )
+    named = sorted(((c, n) for c, n in rows if c), key=lambda x: -x[1])
+    none_n = sum(n for c, n in rows if c is None)
+    if none_n:
+        named.append((CATEGORY_NONE, none_n))
+    return named
 
 
 @router.get("/p/{token}/channels.json")
@@ -29,21 +57,41 @@ def list_channels(
     token: str,
     response: Response,
     category: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
-    # muda no máximo a cada ciclo de health-check (15min); 120s é seguro e já
-    # evita rebaixar a lista ao navegar entre telas
+    """Listagem paginada e filtrada no servidor (achado em 2026-09-13: essa
+    rota devolvia os ~56 mil canais ativos de uma vez, com streams/EPG/idiomas
+    calculados pra cada um — era isso que deixava a tela de TV ao vivo lenta;
+    o filtro por categoria/busca e a paginação ficavam todos no navegador)."""
     response.headers["Cache-Control"] = "public, max-age=120"
-    entries = [
-        (channel, streams)
-        for channel, streams in active_channels_with_all_streams(db)
-        if not category or channel.category == category
-    ]
-    now_playing = now_playing_map(db, [channel.id for channel, _ in entries])
+    base = _visible_channels_query(db)
+    if category == CATEGORY_NONE:
+        base = base.filter(Channel.category.is_(None))
+    elif category:
+        base = base.filter(Channel.category == category)
+    if q:
+        base = base.filter(Channel.name.ilike(f"%{q.strip()}%"))
+
+    total = base.with_entities(func.count(Channel.id)).scalar() or 0
+
+    page_channels = (
+        base.options(joinedload(Channel.streams))
+        .order_by(Channel.name)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    now_playing = now_playing_map(db, [channel.id for channel in page_channels])
 
     items = []
-    for channel, streams in entries:
+    for channel in page_channels:
+        streams = _ranked_streams(channel)[:3]
+        if not streams:
+            continue
         program = now_playing.get(channel.id)
         # idiomas disponíveis pro canal (Português primeiro). Se só tiver 1, o
         # frontend nem mostra seletor — comportamento idêntico ao de antes.
@@ -69,7 +117,78 @@ def list_channels(
                 else None,
             }
         )
-    return {"count": len(items), "channels": items}
+    return {"count": total, "channels": items}
+
+
+@router.get("/p/{token}/channels/categories")
+def list_channel_categories(
+    token: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Categorias com contagem real, do maior pro menor ('Sem categoria' por
+    último) — escopadas aos mesmos canais que aparecem na listagem (ativos,
+    com stream). Antes o chip bar era montado no navegador a partir da lista
+    de canais já carregada, sem contagem e sem ordenação por relevância."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {
+        "categories": [
+            {"category": c, "label": category_label(None if c == CATEGORY_NONE else c), "count": n}
+            for c, n in _category_counts(db)
+        ]
+    }
+
+
+@router.get("/p/{token}/channels/home")
+def channels_home(
+    token: str,
+    response: Response,
+    per_category: int = Query(20, ge=1, le=40),
+    max_categories: int = Query(6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Fileiras da Home (Agora na TV + categorias) num request só (achado em
+    2026-09-13: a Home baixava os ~56 mil canais ativos inteiros só pra montar
+    essas mesmas fileiras filtrando no navegador)."""
+    response.headers["Cache-Control"] = "public, max-age=120"
+
+    def _serialize(channels):
+        now_playing = now_playing_map(db, [c.id for c in channels])
+        out = []
+        for c in channels:
+            program = now_playing.get(c.id)
+            out.append(
+                {
+                    "tvg_id": c.tvg_id,
+                    "name": c.name,
+                    "logo_url": c.logo_url,
+                    "now_playing": {"title": program.title, "ends_at": program.end_time.isoformat()}
+                    if program
+                    else None,
+                }
+            )
+        return out
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    live_channels = (
+        _visible_channels_query(db)
+        .join(Program, Program.channel_id == Channel.id)
+        .filter(Program.start_time <= now, Program.end_time > now)
+        .order_by(Channel.name)
+        .limit(per_category)
+        .all()
+    )
+
+    rows = []
+    for cat, _n in _category_counts(db)[:max_categories]:
+        q = _visible_channels_query(db)
+        q = q.filter(Channel.category.is_(None)) if cat == CATEGORY_NONE else q.filter(Channel.category == cat)
+        channels = q.order_by(Channel.name).limit(per_category).all()
+        rows.append({"category": cat, "label": category_label(None if cat == CATEGORY_NONE else cat), "channels": _serialize(channels)})
+
+    return {"live_now": _serialize(live_channels), "rows": rows}
 
 
 @router.get("/p/{token}/channels/{tvg_id}/resolve")
@@ -80,23 +199,23 @@ def resolve_channel(
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
-    """Verifica AO VIVO (na hora, não pelo cache do health-check) qual mirror do
-    canal está respondendo agora, e devolve só esse. Evita mostrar como
-    'disponível' um canal cuja fonte já caiu desde a última checagem periódica.
-    Com `?lang=`, testa só os mirrors daquele idioma."""
+    """Devolve o melhor mirror do canal pra tocar. Não testa mais ao vivo a
+    partir do servidor (achado em 2026-09-13: o teste do servidor roda do IP
+    da VPS, e vários provedores bloqueiam especificamente IP de datacenter —
+    dá falso-negativo mesmo em mirror que funciona perfeitamente pro
+    navegador do usuário real). A validação de verdade agora é o navegador:
+    se a reprodução falhar de fato, o player chama /report-failure e tenta o
+    próximo mirror sozinho. Com `?lang=`, só considera os mirrors daquele
+    idioma."""
     channel = db.query(Channel).filter(Channel.tvg_id == tvg_id, Channel.is_active.is_(True)).first()
     if channel is None:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
 
     candidates = ranked_stream_urls(channel, lang=lang)
-    live_url = resolve_live_url(candidates)
-    if live_url is None:
+    if not candidates:
         suffix = f" em {lang}" if lang else ""
-        raise HTTPException(
-            status_code=503,
-            detail=f"Nenhum dos {len(candidates)} servidor(es) desse canal{suffix} respondeu agora.",
-        )
-    return {"tvg_id": tvg_id, "url": live_url, "checked_mirrors": len(candidates), "lang": lang}
+        raise HTTPException(status_code=503, detail=f"Esse canal não tem nenhum mirror cadastrado{suffix}.")
+    return {"tvg_id": tvg_id, "url": candidates[0], "checked_mirrors": len(candidates), "lang": lang}
 
 
 @router.get("/p/{token}/channels/{tvg_id}/epg")

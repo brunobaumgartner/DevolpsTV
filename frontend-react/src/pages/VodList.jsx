@@ -20,7 +20,11 @@ export function VodList({ mode, params }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const genres = useFetch("vod-genres", () => api.vodGenres());
+  // chave do cache varia por tipo — sem isso, trocar de tela (Filmes <->
+  // Séries) reaproveitava a contagem de gênero da OUTRA tela (achado real:
+  // "Series | Netflix (22052)" aparecia idêntico nas duas, mesmo os títulos
+  // sendo diferentes em cada uma)
+  const genres = useFetch(`vod-genres-${type || "all"}`, () => api.vodGenres(type));
   const showGenreSelect = !fixedGenre;
 
   // debounce da busca -> reflete em ?q= e reseta a página

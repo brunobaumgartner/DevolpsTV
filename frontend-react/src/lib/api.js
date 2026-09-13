@@ -23,12 +23,17 @@ async function req(path, opts = {}) {
 
 // --- público (precisa de token no path) ---
 export const api = {
-  channels: () => req(`p/${encodeURIComponent(_token)}/channels.json`),
+  channels: (params = {}) =>
+    req(`p/${encodeURIComponent(_token)}/channels.json?${new URLSearchParams(params)}`),
+  channelCategories: () => req(`p/${encodeURIComponent(_token)}/channels/categories`),
+  channelsHome: (perCategory = 20) =>
+    req(`p/${encodeURIComponent(_token)}/channels/home?per_category=${perCategory}`),
   vod: (params = {}) =>
     req(`p/${encodeURIComponent(_token)}/vod?${new URLSearchParams(params)}`),
   vodHome: (perGenre = 15) =>
     req(`p/${encodeURIComponent(_token)}/vod/home?per_genre=${perGenre}`),
-  vodGenres: () => req(`p/${encodeURIComponent(_token)}/vod/genres`),
+  vodGenres: (type) =>
+    req(`p/${encodeURIComponent(_token)}/vod/genres${type ? `?type=${type}` : ""}`),
   vodDetail: (id) => req(`p/${encodeURIComponent(_token)}/vod/${id}`),
   resolve: (tvgId, lang) =>
     req(
