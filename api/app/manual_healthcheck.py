@@ -31,6 +31,14 @@ HEALTHCHECK_TIMEOUT_SEC = 6
 # num tempo razoável quando o botão "rodar tudo" é usado.
 HEALTHCHECK_MAX_WORKERS = 60
 
+# achado real em 2026-09-13: carregar TODOS os vod_streams (1,1 milhão+) como
+# objetos ORM de uma vez só estourou a memória da VPS e derrubou o container
+# (OOM killer) — a thread do job morreu junto, sem nem gravar erro. Processa
+# em pedaços: cada pedaço é testado, gravado e DESCARTADO da memória antes do
+# próximo, então o pico de memória fica limitado a um pedaço, não à tabela
+# inteira, mesmo cobrindo tudo no final.
+VOD_CHUNK_SIZE = 20000
+
 
 def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, bool]:
     headers = {}
@@ -80,21 +88,48 @@ def start_healthcheck_job() -> str:
         }
     register("Health-check", job_id, get_healthcheck_job)
 
+    def _check_chunk(db, rows, kind: str) -> int:
+        """Testa um pedaço (lista de objetos Stream ou VodStream), grava o
+        resultado e devolve quantos ficaram saudáveis. `rows` some da memória
+        assim que a função retorna (só o `processed`/`healthy` acumulado no
+        job persiste)."""
+        if not rows:
+            return 0
+        tasks = (
+            [(s.id, s.url, s.referrer, s.user_agent) for s in rows]
+            if kind == "stream"
+            else [(s.id, s.url, None, None) for s in rows]
+        )
+        results: dict[int, bool] = {}
+        with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
+            futures = {pool.submit(_check_stream, rid, url, ref, ua): rid for rid, url, ref, ua in tasks}
+            for future in as_completed(futures):
+                rid, healthy = future.result()
+                results[rid] = healthy
+                with _jobs_lock:
+                    _jobs[job_id]["processed"] += 1
+                    if healthy:
+                        _jobs[job_id]["healthy"] += 1
+
+        now = datetime.now(timezone.utc)
+        healthy_count = 0
+        for row in rows:
+            healthy = results.get(row.id, False)
+            row.is_healthy = healthy
+            row.last_checked_at = now
+            row.consecutive_failures = 0 if healthy else row.consecutive_failures + 1
+            if healthy:
+                healthy_count += 1
+        db.commit()
+        return healthy_count
+
     def _worker():
         start = time.monotonic()
         db = SessionLocal()
         try:
-            streams = db.query(Stream).all()
-            # sem limite: testa TODOS os mirrors VOD, não só um lote — pedido
-            # explícito pra rodar "tudo" de uma vez (2026-09-13). Antes tinha
-            # um cap de 8000 baseado numa estimativa de escala que se provou
-            # muito menor que a real (catálogo tem 1M+ mirrors agora).
-            vod_streams = (
-                db.query(VodStream)
-                .order_by(VodStream.last_checked_at.is_(None).desc(), VodStream.last_checked_at.asc())
-                .all()
-            )
-            total = len(streams) + len(vod_streams)
+            streams = db.query(Stream).all()  # canais: só ~1200 linhas, cabe de boa
+            vod_total = db.query(VodStream.id).count()
+            total = len(streams) + vod_total
             with _jobs_lock:
                 _jobs[job_id]["total"] = total
 
@@ -104,58 +139,51 @@ def start_healthcheck_job() -> str:
                 _record_worker_run("ok", "streams=0, vod_itens=0, saudaveis=0", time.monotonic() - start)
                 return
 
-            tasks = [("stream", s.id, s.url, s.referrer, s.user_agent) for s in streams]
-            tasks += [("vod", v.id, v.url, None, None) for v in vod_streams]
-            results: dict[tuple[str, int], bool] = {}
-
-            with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
-                futures = {
-                    pool.submit(_check_stream, row_id, url, referrer, user_agent): (kind, row_id)
-                    for kind, row_id, url, referrer, user_agent in tasks
-                }
-                for future in as_completed(futures):
-                    kind, row_id = futures[future]
-                    _, healthy = future.result()
-                    results[(kind, row_id)] = healthy
-                    with _jobs_lock:
-                        _jobs[job_id]["processed"] += 1
-                        if healthy:
-                            _jobs[job_id]["healthy"] += 1
-                    if _jobs[job_id]["processed"] % 100 == 0 and is_cancelled(job_id):
-                        for f in futures:
-                            f.cancel()
-                        with _jobs_lock:
-                            _jobs[job_id]["status"] = "cancelled"
-                        _record_worker_run("error", "cancelado pelo admin", time.monotonic() - start)
-                        return
-
-            now = datetime.now(timezone.utc)
-            healthy_count = 0
-            for stream in streams:
-                healthy = results.get(("stream", stream.id), False)
-                stream.is_healthy = healthy
-                stream.last_checked_at = now
-                stream.consecutive_failures = 0 if healthy else stream.consecutive_failures + 1
-                if healthy:
-                    healthy_count += 1
+            healthy_count = _check_chunk(db, streams, "stream")
+            db.expunge_all()  # libera os objetos Stream já processados da memória
 
             vod_healthy_count = 0
-            for vs in vod_streams:
-                healthy = results.get(("vod", vs.id), False)
-                vs.is_healthy = healthy
-                vs.last_checked_at = now
-                vs.consecutive_failures = 0 if healthy else vs.consecutive_failures + 1
-                if healthy:
-                    vod_healthy_count += 1
+            vod_processed = 0
+            cancelled = False
+            last_id = 0
+            # paginação por id (keyset), não por last_checked_at: tentamos
+            # ordenar pelos mais desatualizados primeiro, mas atualizar a
+            # MESMA coluna que ordena o próximo SELECT é frágil (empate de
+            # timestamp em updates rápidos already causou loop infinito
+            # reprocessando o mesmo pedaço sem nunca avançar — achado real
+            # testando local). Por id é determinístico: cada pedaço sempre
+            # avança, sem depender de quando cada linha foi tocada.
+            while True:
+                chunk = (
+                    db.query(VodStream)
+                    .filter(VodStream.id > last_id)
+                    .order_by(VodStream.id)
+                    .limit(VOD_CHUNK_SIZE)
+                    .all()
+                )
+                if not chunk:
+                    break
+                last_id = chunk[-1].id
+                vod_healthy_count += _check_chunk(db, chunk, "vod")
+                vod_processed += len(chunk)
+                db.expunge_all()  # descarta o pedaço já gravado antes de buscar o próximo
+                if is_cancelled(job_id):
+                    cancelled = True
+                    with _jobs_lock:
+                        _jobs[job_id]["status"] = "cancelled"
+                    _record_worker_run("error", "cancelado pelo admin", time.monotonic() - start)
+                    break
 
-            db.commit()
+            if cancelled:
+                return
+
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["healthy"] = healthy_count + vod_healthy_count
             _record_worker_run(
                 "ok",
                 f"streams={len(streams)}, saudaveis={healthy_count}, "
-                f"vod_mirrors={len(vod_streams)}, vod_saudaveis={vod_healthy_count} (manual)",
+                f"vod_mirrors={vod_processed}, vod_saudaveis={vod_healthy_count} (manual)",
                 time.monotonic() - start,
             )
         except Exception as e:

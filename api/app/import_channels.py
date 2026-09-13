@@ -27,6 +27,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 
 from .db import SessionLocal
@@ -82,23 +83,34 @@ def _preload_channels(db, rows) -> dict[str, Channel]:
     """1 (ou poucas) consulta(s) pra achar todos os canais do arquivo que já
     existem, em vez de 1 SELECT por linha nova (mesma otimização do
     import_vod.py — achado real em 2026-09-13)."""
-    wanted = {_clean(r.get("tvg_id")) for r in rows if _clean(r.get("tvg_id"))}
+    wanted = {_clean(r.get("tvg_id")).lower() for r in rows if _clean(r.get("tvg_id"))}
     if not wanted:
         return {}
     wanted = list(wanted)
     found: dict[str, Channel] = {}
     for chunk in _chunks(wanted, _PRELOAD_CHUNK):
-        for c in db.query(Channel).filter(Channel.tvg_id.in_(chunk)).all():
-            found[c.tvg_id] = c
+        # func.lower() dos dois lados: explícito, não depende da collation do
+        # banco ser case-insensitive por baixo dos panos (MySQL geralmente é,
+        # mas não é garantido/portável confiar nisso implicitamente)
+        for c in db.query(Channel).filter(func.lower(Channel.tvg_id).in_(chunk)).all():
+            # chave normalizada (lower): a UNIQUE KEY do MySQL em tvg_id é
+            # case-insensitive (collation padrão) — "ARTE.de" e "Arte.DE" são
+            # o MESMO canal pro banco. Um dict Python é case-sensitive, então
+            # sem normalizar a chave aqui, uma variação de maiúsculas no CSV
+            # (não achada no cache) tentava INSERT de novo e batia na
+            # constraint como duplicata — achado real em 2026-09-13, derrubou
+            # 4 dos 9 arquivos de canal na importação em massa.
+            found[c.tvg_id.lower()] = c
     return found
 
 
 def _preload_streams(db, channel_cache: dict[str, Channel]) -> dict[str, dict[str, Stream]]:
-    """Idem, pros streams dos canais que JÁ existiam."""
+    """Idem, pros streams dos canais que JÁ existiam. `channel_cache` já vem
+    com chave normalizada (lower) de `_preload_channels`."""
     existing_ids = [c.id for c in channel_cache.values() if c.id is not None]
     if not existing_ids:
         return {}
-    id_to_tvg = {c.id: tvg for tvg, c in channel_cache.items()}
+    id_to_tvg = {c.id: tvg_key for tvg_key, c in channel_cache.items()}
     result: dict[str, dict[str, Stream]] = {}
     for chunk in _chunks(existing_ids, _PRELOAD_CHUNK):
         for s in db.query(Stream).filter(Stream.channel_id.in_(chunk)).all():
@@ -123,7 +135,8 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             stats["linhas_ignoradas"].append(i)
             continue
 
-        channel = channel_cache.get(tvg_id)
+        tvg_key = tvg_id.lower()  # normaliza pra bater com a UNIQUE KEY case-insensitive do banco
+        channel = channel_cache.get(tvg_key)
 
         name = _clean(row.get("name"))
         category = _clean(row.get("category"))
@@ -140,8 +153,8 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             )
             db.add(channel)  # sem flush: FK do stream resolvida via relacionamento abaixo
             stats["canais_novos"] += 1
-            channel_cache[tvg_id] = channel
-            streams_cache[tvg_id] = {}
+            channel_cache[tvg_key] = channel
+            streams_cache[tvg_key] = {}
         else:
             changed = False
             if name and channel.name != name:
@@ -159,7 +172,7 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             if changed:
                 stats["canais_atualizados"] += 1
 
-        channel_streams = streams_cache.setdefault(tvg_id, {})
+        channel_streams = streams_cache.setdefault(tvg_key, {})
         if stream_url not in channel_streams:
             stream = Stream(url=stream_url)
             channel.streams.append(stream)  # FK resolvida pelo relacionamento, sem flush
