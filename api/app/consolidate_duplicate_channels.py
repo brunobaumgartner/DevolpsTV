@@ -43,7 +43,10 @@ def normalize_channel_name(name: str) -> str:
         return ""
     n = _TRAILING_DUP_MARK.sub("", name.strip())
     n = _strip_accents(n).lower()
-    n = re.sub(r"\s+", " ", n).strip()
+    # achado em 2026-09-13: "Multishow_HD" não batia com "MULTISHOW HD" porque
+    # só espaço era tratado como separador -- underscore é usado do mesmo
+    # jeito por várias fontes
+    n = re.sub(r"[\s_]+", " ", n).strip()
     return n
 
 
