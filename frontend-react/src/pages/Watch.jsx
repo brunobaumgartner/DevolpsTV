@@ -36,13 +36,13 @@ function episodeLabel(item) {
   return item.episode_title ? `${num} — ${item.episode_title}` : num;
 }
 
-// quantas vezes tenta o próximo mirror antes de desistir e mostrar erro —
-// evita loop infinito se todos os mirrors do canal estiverem fora do ar.
-// Achado em 2026-09-13: com 3, um provedor inteiro marcado (falsamente)
-// como "não saudável" pelo health-check quase nunca era alcançado, mesmo
-// funcionando bem pro navegador real -- ranking por saúde só ordena, não
-// filtra, então mais tentativas dão chance de chegar nesses mirrors.
-const MAX_MIRROR_RETRIES = 6;
+// Teto de segurança, NÃO um limite prático -- pedido explícito do produto:
+// "tem que tentar todas [as opções] e apenas se nenhuma estiver funcionando
+// ele tem que parar e avisar". Quem decide "acabaram os mirrors" é o
+// BACKEND: /resolve devolve 503 quando não sobra nenhum mirror não
+// suprimido pra aquele item, e é isso que encerra o loop (via .catch), não
+// essa contagem. Esse número só existe pra nunca girar pra sempre num bug.
+const MAX_MIRROR_RETRIES = 50;
 
 function WatchChannel({ tvgId }) {
   // busca o canal ESPECÍFICO (antes procurava dentro da lista de
@@ -97,7 +97,7 @@ function WatchChannel({ tvgId }) {
         setStatus("Falha ao reproduzir — nenhum mirror funcionou.");
         return;
       }
-      setStatus(`Falhou, tentando outro servidor (${attempts}/${MAX_MIRROR_RETRIES})…`);
+      setStatus(`Falhou, tentando outro servidor (${attempts})…`);
       tryResolve();
     }
 
