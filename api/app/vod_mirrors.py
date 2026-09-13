@@ -35,6 +35,14 @@ def upsert_mirror(db: Session, item: VodItem, url: str | None) -> bool:
     return True
 
 
+def item_has_healthy_mirror(item: VodItem) -> bool:
+    """True se pelo menos 1 mirror do item já passou no health-check. Usado
+    pra decidir se o episódio/filme aparece como "disponível" — critério mais
+    forte que só "tem link cadastrado" (ver ARQUITETURA: título só some da
+    listagem quando NENHUM mirror de NENHUM item estiver saudável)."""
+    return any(s.is_healthy for s in item.streams)
+
+
 def ranked_mirror_urls(item: VodItem, max_mirrors: int = 5) -> list[str]:
     """URLs dos mirrors saudáveis do item, do melhor pro pior. Cai de volta pro
     `stream_url` legado se o item ainda não tem nenhuma linha em `vod_streams`

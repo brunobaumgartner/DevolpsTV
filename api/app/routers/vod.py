@@ -15,7 +15,7 @@ from ..db import get_db
 from ..live_check import resolve_live_url
 from ..models import AccessToken, VodItem, VodStream, VodTitle, WatchProgress
 from ..security import require_valid_token
-from ..vod_mirrors import ranked_mirror_urls
+from ..vod_mirrors import item_has_healthy_mirror, ranked_mirror_urls
 
 router = APIRouter()
 
@@ -28,6 +28,20 @@ GENRE_NONE = "Outros"
 
 # fração do vídeo a partir da qual consideramos "assistido até o fim"
 FINISH_RATIO = 0.92
+
+
+def _healthy_titles_query(db: Session):
+    """IDs de título que têm pelo menos 1 item com pelo menos 1 mirror
+    saudável — mesmo critério que já esconde canal ao vivo sem stream
+    saudável (`playlist_builder._active_channels`). Um título só sai da
+    listagem quando TODOS os links de TODOS os episódios/filme falharem no
+    health-check; volta sozinho assim que um mirror voltar a passar."""
+    return (
+        db.query(VodItem.title_id)
+        .join(VodStream, VodStream.item_id == VodItem.id)
+        .filter(VodStream.is_healthy.is_(True))
+        .distinct()
+    )
 
 
 @router.get("/p/{token}/vod")
@@ -47,7 +61,7 @@ def list_vod(
     (era isso que deixava lento: 25k títulos puxavam 237k itens juntos) — a
     disponibilidade e a contagem de episódios vêm de agregados baratos, e a
     lista de episódios só é carregada ao abrir um título (/vod/{id})."""
-    base = db.query(VodTitle)
+    base = db.query(VodTitle).filter(VodTitle.id.in_(_healthy_titles_query(db)))
     if type in ("movie", "series"):
         base = base.filter(VodTitle.type == type)
     if genre == GENRE_NONE:
@@ -60,11 +74,7 @@ def list_vod(
     total = base.with_entities(func.count(VodTitle.id)).scalar() or 0
 
     rows = (
-        base.add_columns(
-            func.count(VodItem.id).label("item_count"),
-            # count() ignora NULL — conta só itens com link
-            func.count(VodItem.stream_url).label("available_count"),
-        )
+        base.add_columns(func.count(VodItem.id).label("item_count"))
         .outerjoin(VodItem, VodItem.title_id == VodTitle.id)
         .group_by(VodTitle.id)
         .order_by(VodTitle.title)
@@ -83,18 +93,28 @@ def list_vod(
                 "poster_url": t.poster_url,
                 "genre": t.genre or GENRE_NONE,
                 "year": t.year,
-                "available": available_count > 0,
+                # sempre True aqui: a listagem já filtrou pra só títulos com
+                # pelo menos 1 mirror saudável (ver _healthy_titles_query)
+                "available": True,
                 "episode_count": item_count if t.type == "series" else None,
             }
-            for (t, item_count, available_count) in rows
+            for (t, item_count) in rows
         ],
     }
 
 
 def _genre_counts(db):
     """[(genre_ou_'Outros', count)] ordenado do maior pro menor. 'Outros' (sem
-    gênero) sempre por último."""
-    rows = db.query(VodTitle.genre, func.count(VodTitle.id)).group_by(VodTitle.genre).all()
+    gênero) sempre por último. Só conta títulos com pelo menos 1 mirror
+    saudável (mesmo critério da listagem) — senão os chips de gênero
+    mostrariam números maiores do que o que a listagem filtrada realmente
+    devolve."""
+    rows = (
+        db.query(VodTitle.genre, func.count(VodTitle.id))
+        .filter(VodTitle.id.in_(_healthy_titles_query(db)))
+        .group_by(VodTitle.genre)
+        .all()
+    )
     named = sorted(((g, c) for g, c in rows if g), key=lambda x: -x[1])
     none_c = sum(c for g, c in rows if g is None)
     if none_c:
@@ -129,7 +149,7 @@ def vod_home(
     requests, um por gênero). Sem itens/episódios."""
     out = []
     for genre, _count in _genre_counts(db)[:max_genres]:
-        q = db.query(VodTitle)
+        q = db.query(VodTitle).filter(VodTitle.id.in_(_healthy_titles_query(db)))
         if genre == GENRE_NONE:
             q = q.filter(VodTitle.genre.is_(None))
         else:
@@ -161,7 +181,12 @@ def vod_detail(
     db: Session = Depends(get_db),
     _access: AccessToken = Depends(require_valid_token),
 ):
-    t = db.query(VodTitle).options(joinedload(VodTitle.items)).filter(VodTitle.id == title_id).first()
+    t = (
+        db.query(VodTitle)
+        .options(joinedload(VodTitle.items).joinedload(VodItem.streams))
+        .filter(VodTitle.id == title_id)
+        .first()
+    )
     if t is None:
         raise HTTPException(status_code=404, detail="Título não encontrado")
 
@@ -192,7 +217,12 @@ def vod_detail(
                 "season_number": i.season_number,
                 "episode_number": i.episode_number,
                 "episode_title": i.episode_title,
-                "available": i.stream_url is not None,
+                # disponível = tem mirror que passou no health-check (não só
+                # "tem link cadastrado") — numa série, cada episódio tem seu
+                # próprio status: só o(s) que estiver(em) com link saudável
+                # aparece(m) como assistível, os outros ficam "sem link" até
+                # algum mirror deles voltar a passar no teste.
+                "available": item_has_healthy_mirror(i),
                 # a URL só é revelada aqui, no detalhe de um título específico já
                 # autenticado por token — não aparece na listagem geral. Mantida
                 # por compatibilidade (play imediato); o player deve preferir
@@ -270,9 +300,11 @@ def _next_episode(db: Session, title_id: int, item_id: Optional[int]) -> Optiona
     key = (cur.season_number or 0, cur.episode_number or 0)
     eps = (
         db.query(VodItem)
-        .filter(VodItem.title_id == title_id, VodItem.stream_url.isnot(None))
+        .options(joinedload(VodItem.streams))
+        .filter(VodItem.title_id == title_id)
         .all()
     )
+    eps = [e for e in eps if item_has_healthy_mirror(e)]
     nxt = sorted(
         (e for e in eps if (e.season_number or 0, e.episode_number or 0) > key),
         key=lambda e: (e.season_number or 0, e.episode_number or 0),

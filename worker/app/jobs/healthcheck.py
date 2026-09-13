@@ -16,7 +16,7 @@ logger = logging.getLogger("iptv-worker.healthcheck")
 # ciclo levaria horas. Cada rodada pega só um LOTE dos mais desatualizados
 # (nunca checados ou checados há +VOD_STALE_HOURS). Assim o catálogo inteiro
 # roda em ~1 dia sem cada ciclo estourar o tempo.
-VOD_BATCH = 4000
+VOD_BATCH = 10000
 VOD_STALE_HOURS = 18
 
 
