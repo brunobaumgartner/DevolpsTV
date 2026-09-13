@@ -16,6 +16,8 @@ deixa passar):
 
 Idempotente: rodar de novo não dá erro (só não acha mais nada pra apagar)."""
 
+import re
+
 from sqlalchemy import or_
 
 from .db import SessionLocal
@@ -24,13 +26,36 @@ from .models import Channel, VodTitle
 ADULT_GENRE = "Adulto"
 ADULT_CATEGORY = "Adulto"
 
-_TITLE_MARKERS = ["%[XXX]%", "%[Adulto]%", "Adulto:%", "Adulto -%", "XXX %", "XXX"]
+# marcadores exatos (LIKE) -- casos com formato fixo de prefixo/sufixo
+_TITLE_LIKE_MARKERS = ["%[XXX]%", "%[Adulto]%", "Adulto:%", "Adulto -%", "XXX %", "XXX", "Brasileirinhas%"]
+
+# palavra isolada em qualquer posição do título, PT/EN e variações de acento
+# (achado em 2026-09-13: "adult"/"porn" sozinhos não bateram em nenhum título
+# legítimo do catálogo -- conferido antes de aplicar)
+_TITLE_WORD_MARKERS = re.compile(
+    r"\b(adult|adulto|adultos|porn|porno|pornô|pornografi\w*|pornographic|hentai|erotic|erótic\w*|nsfw)\b",
+    re.IGNORECASE,
+)
+_TITLE_PLUS18 = re.compile(r"18\s*\+|\+\s*18")
+
+
+def _title_is_adult(title: str) -> bool:
+    return bool(_TITLE_WORD_MARKERS.search(title) or _TITLE_PLUS18.search(title))
 
 
 def _adult_vod_query(db):
-    return db.query(VodTitle).filter(
-        or_(VodTitle.genre == ADULT_GENRE, *[VodTitle.title.like(p) for p in _TITLE_MARKERS])
-    )
+    like_filters = [VodTitle.title.like(p) for p in _TITLE_LIKE_MARKERS]
+    candidates = db.query(VodTitle).filter(or_(VodTitle.genre == ADULT_GENRE, *like_filters)).all()
+    ids = {t.id for t in candidates}
+    # marcadores por palavra/regex não dá pra fazer direto em SQL portável --
+    # varre em Python só os títulos que ainda não bateram no LIKE
+    rest = db.query(VodTitle.id, VodTitle.title)
+    if ids:
+        rest = rest.filter(VodTitle.id.notin_(ids))
+    for tid, title in rest.all():
+        if title and _title_is_adult(title):
+            ids.add(tid)
+    return db.query(VodTitle).filter(VodTitle.id.in_(ids))
 
 
 def run(db=None) -> dict:
