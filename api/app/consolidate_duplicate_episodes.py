@@ -41,9 +41,14 @@ _TITLE_CHUNK = 100
 
 
 def _distinct_title_ids_with_dupes(db) -> list[int]:
+    # sem filtro de season_number: filme tem 1 item com season/episode NULL,
+    # e o MySQL agrupa múltiplos NULL juntos no GROUP BY (diferente de um
+    # WHERE) -- então isso também pega filme duplicado (2+ VodItem pro mesmo
+    # título, achado em 2026-09-13 com "O Incrível Hulk" depois da
+    # consolidação de VodTitle: os itens dos títulos mesclados ficam soltos,
+    # um por fonte, dentro do mesmo título até isso rodar)
     rows = (
         db.query(VodItem.title_id)
-        .filter(VodItem.season_number.isnot(None))
         .group_by(VodItem.title_id, VodItem.season_number, VodItem.episode_number)
         .having(func.count(VodItem.id) > 1)
         .all()
@@ -101,7 +106,6 @@ def run(db=None, progress_every=20) -> dict:
                 db.query(VodItem)
                 .options(joinedload(VodItem.streams))
                 .filter(VodItem.title_id.in_(chunk))
-                .filter(VodItem.season_number.isnot(None))
                 .all()
             )
             grouped: dict[tuple, list[VodItem]] = defaultdict(list)
