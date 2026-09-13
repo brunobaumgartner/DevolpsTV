@@ -22,12 +22,22 @@ import sys
 from collections import defaultdict
 
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.exc import StaleDataError
 
 from .db import SessionLocal
 from .models import VodItem, VodStream, WatchProgress
 
-_TITLE_CHUNK = 300
+# health-check e outros jobs mexem em vod_streams ao mesmo tempo -- um
+# UPDATE/DELETE concorrente na mesma linha entre o SELECT e o commit deste
+# script gera StaleDataError (rowcount não bate) ou deadlock (OperationalError
+# 1213/1205). Achado em 2026-09-13: 1º rodada em produção crashou inteira por
+# isso, sem consolidar nada (savepoint por grupo evita perder o chunk todo
+# por causa de 1 grupo com concorrência).
+_RETRYABLE = (StaleDataError, OperationalError)
+
+_TITLE_CHUNK = 100
 
 
 def _distinct_title_ids_with_dupes(db) -> list[int]:
@@ -75,7 +85,12 @@ def _dedupe_group(db, items: list[VodItem]) -> int:
 def run(db=None, progress_every=20) -> dict:
     owns_session = db is None
     db = db or SessionLocal()
-    stats = {"titulos_processados": 0, "grupos_consolidados": 0, "itens_removidos": 0}
+    stats = {
+        "titulos_processados": 0,
+        "grupos_consolidados": 0,
+        "itens_removidos": 0,
+        "grupos_com_erro_concorrencia": 0,
+    }
     try:
         title_ids = _distinct_title_ids_with_dupes(db)
         total_titles = len(title_ids)
@@ -94,10 +109,20 @@ def run(db=None, progress_every=20) -> dict:
                 grouped[(item.title_id, item.season_number, item.episode_number)].append(item)
 
             for group in grouped.values():
-                if len(group) > 1:
-                    removed = _dedupe_group(db, group)
+                if len(group) <= 1:
+                    continue
+                # savepoint por grupo: um erro de concorrência (health-check
+                # mexendo nas mesmas linhas ao mesmo tempo) não derruba o
+                # chunk inteiro, só esse grupo -- como o script é idempotente,
+                # rodar de novo resolve o que sobrou (mais simples e seguro
+                # que tentar retry dentro da mesma sessão já afetada pelo erro)
+                try:
+                    with db.begin_nested():
+                        removed = _dedupe_group(db, group)
                     stats["grupos_consolidados"] += 1
                     stats["itens_removidos"] += removed
+                except _RETRYABLE:
+                    stats["grupos_com_erro_concorrencia"] += 1
 
             db.commit()
             db.expunge_all()
