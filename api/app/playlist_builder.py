@@ -46,14 +46,27 @@ def rank_mirrors(candidates):
         return []
 
     def health_rank(s):
-        if s.is_healthy is True:
-            return 0  # servidor confirmou -- tenta primeiro
-        if s.is_healthy is None:
-            return 1  # nunca testado -- tenta antes de um confirmado ruim
-        return 2  # servidor marcou ruim -- ainda tentável (pode ser falso-negativo), mas por último
+        # só PREMIA o que o servidor confirmou funcionar; NÃO penaliza o que
+        # ele disse que não funciona. Achado em 2026-09-13: o health-check
+        # marcou 88% dos mirrors de canal e 582 mil de VOD como "ruins"
+        # (contra 88 confirmados bons no VOD inteiro) -- como ele roda do IP
+        # da VPS e os provedores bloqueiam datacenter, esse "ruim" é falso
+        # negativo em massa. Tratar False como "pior que nunca testado"
+        # empurrava justamente os links bons pro fim da fila, atrás de
+        # qualquer link novo não testado (que em geral é lixo de importação).
+        return 0 if s.is_healthy is True else 1
 
     fallback = datetime(2000, 1, 1)
-    usable.sort(key=lambda s: (health_rank(s), s.consecutive_failures, -(s.last_checked_at or fallback).timestamp()))
+    usable.sort(
+        key=lambda s: (
+            health_rank(s),
+            # falha REAL reportada pelo navegador de um usuário vale como
+            # desempate (mesmo já tendo expirado a supressão); a contagem de
+            # falhas do servidor não, pelo mesmo motivo acima
+            s.client_failure_count,
+            -(s.last_checked_at or fallback).timestamp(),
+        )
+    )
     return usable
 
 
