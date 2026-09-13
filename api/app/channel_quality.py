@@ -22,7 +22,7 @@ def is_junk_channel_name(name: str | None) -> bool:
     if not name:
         return False
     stripped = name.strip()
-    if stripped.startswith("--"):
+    if stripped.startswith("--") or stripped.startswith(".:"):
         return True
     if _DASH_SEPARATOR.search(stripped):
         return True
