@@ -80,7 +80,16 @@ function startLoadWatchdog(video, fatalOnce) {
 function attachDirectRetry(video, fatalOnce) {
   let retries = 0;
   video.onerror = () => {
-    if (retries < DIRECT_RETRY_ATTEMPTS) {
+    // MEDIA_ERR_NETWORK (2) é transitório -> vale insistir no mesmo link.
+    // MEDIA_ERR_DECODE (3) e MEDIA_ERR_SRC_NOT_SUPPORTED (4) são definitivos:
+    // o servidor devolveu HTML de erro/403 ou algo que não é vídeo, e
+    // retentar só queima tempo. Achado em 2026-09-13 instrumentando o player
+    // no navegador: um mirror morto dava erro 4 em ~1s, mas o retry cego
+    // segurava 10s+ nele enquanto um mirror BOM (que abre em 2,3s) esperava
+    // atrás na fila -- era isso que fazia parecer que "nada funciona".
+    const code = video.error?.code;
+    const vaisTentarDeNovo = code === 2 && retries < DIRECT_RETRY_ATTEMPTS;
+    if (vaisTentarDeNovo) {
       retries += 1;
       setTimeout(() => {
         if (video.isConnected) {

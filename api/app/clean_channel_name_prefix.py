@@ -40,7 +40,9 @@ _PREFIX_ALT = "|".join(re.escape(p) for p in sorted(_KNOWN_PREFIXES, key=len, re
 # dos casos reais tem só 1; "VIP|TR| resto" com 2 fica de fora de propósito,
 # mais raro e mais arriscado de generalizar)
 _PREFIX_RE = re.compile(
-    rf"^\*?(?:\[(?:{_PREFIX_ALT})\]|(?:{_PREFIX_ALT})\s*[:|])\s*",
+    # "[TR]" e "[ TR ]" (com espaço dentro dos colchetes) contam igual --
+    # achado em 2026-09-13: "[ TR ] Number 1 1080p" escapava da 1ª versão
+    rf"^\*?(?:\[\s*(?:{_PREFIX_ALT})\s*\]|(?:{_PREFIX_ALT})\s*[:|])\s*",
     re.IGNORECASE,
 )
 _TRAILING_JUNK_RE = re.compile(r"[\s\-]+$")
