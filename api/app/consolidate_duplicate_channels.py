@@ -1,19 +1,25 @@
 """Unifica canais duplicados -- o MESMO canal importado de várias fontes como
 registros separados (achado em 2026-09-13: "AMC" aparecia 12x seguidas na
-listagem; "BAND CAMPINAS HD", "Band Campinas HD", "BAND CAMPINAS HD¹" e
-"BAND CAMPINAS HD²" eram 4 registros do mesmo canal). Mantém um só e move os
-links dos outros pra ele como mirrors.
+listagem; "Multishow", "Multishow HD", "Multishow 4K", "Multishow FHD H265"
+eram registros separados do mesmo canal). Mantém um só e move os links dos
+outros pra ele como mirrors -- o player já testa todos e fica com o primeiro
+que funcionar, então qualidade/formato do link não precisa ser um canal à
+parte (pedido explícito do produto em 2026-09-13: "esse 4k, fhd, h265...
+tudo tem que ser o mesmo, testar todos na hora de apresentar").
 
-Critério DELIBERADAMENTE conservador -- só unifica quando o nome normalizado
-é IDÊNTICO. O que NÃO é unificado, de propósito:
-  - região/versão diferente: "AMC (BR)" != "AMC (BALKAN)"
-  - qualidade diferente: "BAND CAMPINAS HD" != "BAND CAMPINAS SD"
-  - praças diferentes da mesma rede: "Globo RJ" != "Globo SP"
-Na dúvida, não funde -- juntar dois canais que são realmente diferentes é
-muito pior que deixar uma duplicata na lista.
+Por isso a normalização REMOVE indicador de qualidade/formato/fonte do nome
+antes de comparar (4K, HD, SD, FHD, UHD, H265, H264, HEVC, resoluções tipo
+1080p, e marcadores de fonte alternativa como "[Alter]"/"VIP"/"Backup") --
+"Multishow", "Multishow HD" e "Multishow 4K" todos viram a mesma chave
+"multishow" e são unificados num canal só.
 
-A normalização remove: caixa, acento, espaço repetido e o sufixo de
-desambiguação que a própria fonte usa (¹ ² ³ ... e " 2"/" (2)" no fim)."""
+O que continua SEPARADO de propósito (não é qualidade, é conteúdo
+diferente): região/idioma -- "AMC (BR)" != "AMC (BALKAN)" -- e praça de
+uma rede regional -- "Globo RJ" != "Globo SP". Esses tokens não estão na
+lista de qualidade, então sobrevivem à normalização e mantêm os grupos
+separados. Na dúvida (token desconhecido), não remove -- juntar dois canais
+que são realmente diferentes é muito pior que deixar uma duplicata na lista.
+"""
 
 import re
 import sys
@@ -33,6 +39,18 @@ _COMMIT_EVERY = 200
 _SUPERSCRIPTS = "¹²³⁴⁵⁶⁷⁸⁹⁰"
 _TRAILING_DUP_MARK = re.compile(rf"[\s\-]*(?:[{_SUPERSCRIPTS}]+|\((?:\d{{1,2}})\))\s*$")
 
+# tokens de qualidade/formato/fonte -- removidos do FIM do nome, um por vez,
+# enquanto o último token bater aqui (nunca esvazia tudo: se só sobrar
+# qualidade, ela fica). "full" sozinho fica de fora de propósito (risco de
+# corromper nome de canal de verdade); "full hd" por extenso ainda cai pelo
+# "hd" isolado, só não remove o "full" que sobra ao lado -- lacuna aceita.
+_QUALITY_TOKENS = {
+    "4k", "8k", "uhd", "fhd", "hd", "sd",
+    "h265", "h264", "hevc", "avc",
+    "1080p", "1080i", "720p", "576p", "480p", "360p", "320p", "240p",
+    "alter", "alt", "backup", "vip",
+}
+
 
 def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
@@ -43,11 +61,14 @@ def normalize_channel_name(name: str) -> str:
         return ""
     n = _TRAILING_DUP_MARK.sub("", name.strip())
     n = _strip_accents(n).lower()
-    # achado em 2026-09-13: "Multishow_HD" não batia com "MULTISHOW HD" porque
-    # só espaço era tratado como separador -- underscore é usado do mesmo
-    # jeito por várias fontes
-    n = re.sub(r"[\s_]+", " ", n).strip()
-    return n
+    # abre colchete/parêntese/underscore/hífen em espaço -- "[Alter]" e
+    # "(BR)" viram tokens soltos "alter"/"br" pra avaliar cada um contra a
+    # lista de qualidade (região como "br" não está na lista, sobrevive)
+    n = re.sub(r"[\[\]()_\-]+", " ", n)
+    tokens = n.split()
+    while len(tokens) > 1 and tokens[-1] in _QUALITY_TOKENS:
+        tokens.pop()
+    return " ".join(tokens)
 
 
 def _merge_group(db, channels: list[Channel]) -> int:
