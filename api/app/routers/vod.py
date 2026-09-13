@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
@@ -24,6 +24,11 @@ class FailureReport(BaseModel):
 
 # valor especial no filtro de gênero pra "títulos sem gênero"
 GENRE_NONE = "Outros"
+
+# gênero "Adulto" nunca aparece pro público (chip, listagem, busca, Home,
+# detalhe, resolve) -- só o admin vê e gerencia esse conteúdo (/admin/vod/*,
+# sem esse filtro). Pedido explícito do produto em 2026-09-13.
+ADULT_GENRE = "Adulto"
 
 # fração do vídeo a partir da qual consideramos "assistido até o fim"
 FINISH_RATIO = 0.92
@@ -46,7 +51,9 @@ def list_vod(
     (era isso que deixava lento: 25k títulos puxavam 237k itens juntos) — a
     disponibilidade e a contagem de episódios vêm de agregados baratos, e a
     lista de episódios só é carregada ao abrir um título (/vod/{id})."""
-    base = db.query(VodTitle)
+    # genre != ADULT_GENRE sozinho excluiria também quem tem genre NULL (NULL
+    # != 'Adulto' dá NULL em SQL, não TRUE) -- por isso o OR explícito
+    base = db.query(VodTitle).filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
     if type in ("movie", "series"):
         base = base.filter(VodTitle.type == type)
     if genre == GENRE_NONE:
@@ -111,7 +118,9 @@ def _genre_counts(db, type: Optional[str] = None):  # noqa: A002 - nome claro pr
     contagem (soma dos dois) tanto na tela de Filmes quanto na de Séries —
     confuso quando os números não batiam com o que a listagem filtrada por
     tipo realmente trazia."""
-    q = db.query(VodTitle.genre, func.count(VodTitle.id))
+    q = db.query(VodTitle.genre, func.count(VodTitle.id)).filter(
+        or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None))
+    )
     if type in ("movie", "series"):
         q = q.filter(VodTitle.type == type)
     rows = q.group_by(VodTitle.genre).all()
@@ -189,7 +198,9 @@ def vod_detail(
         .filter(VodTitle.id == title_id)
         .first()
     )
-    if t is None:
+    # gênero "Adulto" é admin-only -- 404 (não 403, mesma lógica do
+    # require_valid_token) pra não confirmar que o ID existe
+    if t is None or t.genre == ADULT_GENRE:
         raise HTTPException(status_code=404, detail="Título não encontrado")
 
     items = sorted(t.items, key=lambda i: (i.season_number or 0, i.episode_number or 0))
@@ -245,7 +256,15 @@ def resolve_vod_item(
     Quem valida de verdade agora é o navegador: se a reprodução falhar de
     fato, o player chama /report-failure e tenta o próximo mirror sozinho
     (ver hls.js/Watch.jsx)."""
-    item = db.query(VodItem).options(joinedload(VodItem.streams)).filter(VodItem.id == item_id).first()
+    item = (
+        db.query(VodItem)
+        .options(joinedload(VodItem.streams), joinedload(VodItem.vod_title))
+        .filter(VodItem.id == item_id)
+        .first()
+    )
+    # gênero "Adulto" é admin-only -- mesma regra do vod_detail
+    if item is not None and item.vod_title.genre == ADULT_GENRE:
+        item = None
     if item is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
 

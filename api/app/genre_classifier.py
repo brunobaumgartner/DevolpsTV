@@ -34,6 +34,18 @@ DEFAULT_KEYWORDS: dict[str, list[str]] = {
         "biography", "biopic", "based on true story", "based on real events", "life story of",
         "biografia", "baseado em fatos reais", "história de vida", "a vida real de",
     ],
+    # gêneros admin-only (pedido em 2026-09-13): "Adulto" nunca aparece pro
+    # público (ver ADULT_GENRE em routers/vod.py); "Religião" é público normal,
+    # só não existia no vocabulário canônico até agora
+    "Religião": [
+        "christian film", "faith-based", "bible story", "biblical", "gospel", "megachurch",
+        "religious documentary", "religião", "cristão", "cristã", "evangelho", "bíblico",
+        "bíblia", "pregador", "pastor evangélico", "documentário religioso", "milagre de deus",
+    ],
+    "Adulto": [
+        "xxx", "adult film", "erotic", "erótico", "erótica", "pornô", "pornografia",
+        "conteúdo adulto", "filme adulto", "hot",
+    ],
     # Anime vem ANTES de Animação na ordem de prioridade — quando o título tem
     # sinal claro de anime japonês, ganha "Anime"; senão cai em "Animação"
     "Anime": [
