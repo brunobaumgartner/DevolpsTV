@@ -159,6 +159,15 @@ def _imdb_poster(title: str):
     return None
 
 
+# limita o ritmo de chamadas ao TMDB (evita rate-limit/sobrecarga num
+# catálogo com dezenas de milhares de títulos faltando dado) — processa um
+# lote, espera completar a janela de 20min desde o início dele, processa o
+# próximo. O job continua em 1 clique só: a barra de progresso do dashboard
+# vai avançando aos poucos (pode levar horas num backlog grande).
+_TMDB_BATCH_SIZE = 900
+_TMDB_BATCH_WINDOW_SEC = 20 * 60
+_CANCEL_POLL_SEC = 5  # granularidade da checagem de cancelamento durante a espera
+
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 
@@ -212,42 +221,67 @@ def start_tmdb_job() -> str:
 
             matched = genres = done = 0
             cancelled = False
-            with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-                futs = [pool.submit(task, r) for r in rows]
-                for fut in as_completed(futs):
-                    row, res, poster = fut.result()
-                    tid, _t, year, _typ, has_poster, has_desc, has_genre, has_bd, has_rating = row
-                    done += 1
-                    vals = {}
-                    if poster and not has_poster:
-                        vals["poster_url"] = poster
-                        matched += 1
-                    if res:
-                        if res["overview"] and not has_desc:
-                            vals["description"] = res["overview"]
-                        if res["year"] and not year:
-                            vals["year"] = res["year"]
-                        if res["genre"] and not has_genre:
-                            vals["genre"] = res["genre"]
-                            genres += 1
-                        if res["backdrop_url"] and not has_bd:
-                            vals["backdrop_url"] = res["backdrop_url"]
-                        if res["rating"] and not has_rating:
-                            vals["rating"] = res["rating"]
-                        if res["tmdb_id"]:
-                            vals["tmdb_id"] = res["tmdb_id"]
-                    if vals:
-                        db.query(VodTitle).filter(VodTitle.id == tid).update(vals, synchronize_session=False)
-                    if done % 50 == 0:
-                        db.commit()
-                        _set(job_id, processed=done, matched=matched, genres=genres)
-                    if is_cancelled(job_id):
-                        cancelled = True
-                        for f in futs:
-                            f.cancel()
-                        break
+            batches = [rows[i : i + _TMDB_BATCH_SIZE] for i in range(0, len(rows), _TMDB_BATCH_SIZE)]
 
-            db.commit()
+            for batch_idx, batch in enumerate(batches):
+                batch_start = time.monotonic()
+                _set(job_id, phase=f"lote {batch_idx + 1}/{len(batches)} — buscando no TMDB")
+
+                with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+                    futs = [pool.submit(task, r) for r in batch]
+                    for fut in as_completed(futs):
+                        row, res, poster = fut.result()
+                        tid, _t, year, _typ, has_poster, has_desc, has_genre, has_bd, has_rating = row
+                        done += 1
+                        vals = {}
+                        if poster and not has_poster:
+                            vals["poster_url"] = poster
+                            matched += 1
+                        if res:
+                            if res["overview"] and not has_desc:
+                                vals["description"] = res["overview"]
+                            if res["year"] and not year:
+                                vals["year"] = res["year"]
+                            if res["genre"] and not has_genre:
+                                vals["genre"] = res["genre"]
+                                genres += 1
+                            if res["backdrop_url"] and not has_bd:
+                                vals["backdrop_url"] = res["backdrop_url"]
+                            if res["rating"] and not has_rating:
+                                vals["rating"] = res["rating"]
+                            if res["tmdb_id"]:
+                                vals["tmdb_id"] = res["tmdb_id"]
+                        if vals:
+                            db.query(VodTitle).filter(VodTitle.id == tid).update(vals, synchronize_session=False)
+                        if done % 50 == 0:
+                            db.commit()
+                            _set(job_id, processed=done, matched=matched, genres=genres)
+                        if is_cancelled(job_id):
+                            cancelled = True
+                            for f in futs:
+                                f.cancel()
+                            break
+
+                db.commit()
+                _set(job_id, processed=done, matched=matched, genres=genres)
+                if cancelled:
+                    break
+
+                is_last_batch = batch_idx == len(batches) - 1
+                if not is_last_batch:
+                    wait = max(0.0, _TMDB_BATCH_WINDOW_SEC - (time.monotonic() - batch_start))
+                    _set(job_id, phase=f"lote {batch_idx + 1}/{len(batches)} feito — "
+                                        f"aguardando {int(wait / 60)}min pro próximo (limite de {_TMDB_BATCH_SIZE}/20min)")
+                    slept = 0.0
+                    while slept < wait:
+                        if is_cancelled(job_id):
+                            cancelled = True
+                            break
+                        time.sleep(min(_CANCEL_POLL_SEC, wait - slept))
+                        slept += _CANCEL_POLL_SEC
+                if cancelled:
+                    break
+
             if cancelled:
                 _set(job_id, status="cancelled", phase=f"cancelado em {done} de {len(rows)}",
                      processed=done, matched=matched, genres=genres)
