@@ -60,26 +60,47 @@ def _dedupe_group(db, items: list[VodItem]) -> int:
     """`items`: todos os VodItem do mesmo (title_id, season, episode), 2+.
     Mantém o de menor id, migra os streams (e o stream_url legado) dos
     outros pra ele -- sem duplicar URL já presente --, apaga o resto.
-    Devolve quantos itens foram removidos."""
+    Devolve quantos itens foram removidos.
+
+    Achado em 2026-09-13: a versão anterior atribuía `stream.item_id = ...`
+    objeto por objeto (UPDATE individual no flush do ORM) -- isso gerava
+    StaleDataError sistemático ("expected to update N row(s); 0 were
+    matched") mesmo quando as linhas existiam de verdade no banco (conferido
+    via SELECT direto), reproduzido de forma isolada sem nenhuma concorrência
+    real. Trocado por UPDATE/DELETE em bulk via query (sem a checagem
+    "expected vs matched" que o flush do ORM faz linha a linha) -- mais
+    robusto e também mais rápido."""
     items.sort(key=lambda i: i.id)
     survivor, dupes = items[0], items[1:]
+    dupe_ids = [d.id for d in dupes]
+    if not dupe_ids:
+        return 0
 
     existing_urls = {s.url for s in survivor.streams}
     if survivor.stream_url:
         existing_urls.add(survivor.stream_url)
 
+    dupe_streams = db.query(VodStream).filter(VodStream.item_id.in_(dupe_ids)).all()
+    ids_to_delete, ids_to_move = [], []
+    for stream in dupe_streams:
+        if stream.url in existing_urls:
+            ids_to_delete.append(stream.id)
+        else:
+            ids_to_move.append(stream.id)
+            existing_urls.add(stream.url)
+
+    if ids_to_delete:
+        db.query(VodStream).filter(VodStream.id.in_(ids_to_delete)).delete(synchronize_session=False)
+    if ids_to_move:
+        db.query(VodStream).filter(VodStream.id.in_(ids_to_move)).update(
+            {VodStream.item_id: survivor.id}, synchronize_session=False
+        )
+
     for dupe in dupes:
-        for stream in list(dupe.streams):
-            if stream.url in existing_urls:
-                db.delete(stream)
-            else:
-                stream.item_id = survivor.id
-                existing_urls.add(stream.url)
         if dupe.stream_url and dupe.stream_url not in existing_urls:
             db.add(VodStream(item_id=survivor.id, url=dupe.stream_url))
             existing_urls.add(dupe.stream_url)
 
-    dupe_ids = [d.id for d in dupes]
     db.query(WatchProgress).filter(WatchProgress.item_id.in_(dupe_ids)).update(
         {WatchProgress.item_id: survivor.id}, synchronize_session=False
     )
