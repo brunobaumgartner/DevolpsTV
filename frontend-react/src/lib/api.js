@@ -134,6 +134,7 @@ export const adminApi = {
 
   // catálogo / cadastro
   vodList: (params = {}) => req(`admin/vod?${new URLSearchParams(params)}`),
+  vodGenres: (type) => req(`admin/vod/genres${type ? `?type=${type}` : ""}`),
   vodAdminDetail: (id) => req(`admin/vod/${id}`),
   addMovie: (b) => jpost("admin/vod/movie", b),
   addSeries: (b) => jpost("admin/vod/series", b),

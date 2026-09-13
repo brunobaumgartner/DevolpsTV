@@ -33,6 +33,7 @@ from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle, WorkerRun
 from ..system_info import snapshot as system_snapshot, top_processes
 from ..vod_mirrors import upsert_mirror
+from .vod import _genre_counts
 
 router = APIRouter(prefix="/admin")
 
@@ -189,6 +190,18 @@ def admin_list_vod(
             for t in titles
         ],
     }
+
+
+@router.get("/vod/genres")
+def admin_list_vod_genres(
+    type: Optional[str] = None,  # noqa: A002
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    """Igual ao /p/{token}/vod/genres público, mas COM o gênero "Adulto" (o
+    admin precisa poder filtrar/gerenciar esse conteúdo mesmo ele sendo
+    escondido do catálogo público — ver ADULT_GENRE em routers/vod.py)."""
+    return {"genres": [{"genre": g, "count": c} for g, c in _genre_counts(db, type, include_adult=True)]}
 
 
 @router.get("/vod/titles-without-genre")

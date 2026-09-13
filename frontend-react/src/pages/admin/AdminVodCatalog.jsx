@@ -1,5 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
-import { adminApi, api } from "../../lib/api.js";
+import { adminApi } from "../../lib/api.js";
 import { ChipBar } from "../../components/ChipBar.jsx";
 
 const PAGE = 30;
@@ -23,7 +23,7 @@ export function AdminVodCatalog() {
   const [openId, setOpenId] = useState(null);
 
   useEffect(() => {
-    api.vodGenres().then((d) => setGenres(d.genres || [])).catch(() => {});
+    adminApi.vodGenres().then((d) => setGenres(d.genres || [])).catch(() => {});
   }, []);
 
   function load(p = page) {

@@ -109,18 +109,20 @@ def list_vod(
     }
 
 
-def _genre_counts(db, type: Optional[str] = None):  # noqa: A002 - nome claro pro cliente
+def _genre_counts(db, type: Optional[str] = None, include_adult: bool = False):  # noqa: A002 - nome claro pro cliente
     """[(genre_ou_'Outros', count)] ordenado do maior pro menor. 'Outros' (sem
     gênero) sempre por último. Com `type`, conta só filme OU série.
+    `include_adult=True` é só pro admin (ver /admin/vod/genres) -- o público
+    nunca deve receber o gênero "Adulto" (ver ADULT_GENRE).
 
     Achado real em 2026-09-13: sem esse filtro, um gênero (ex: "Series |
     Netflix") que tenha títulos com type=movie E type=series mostrava a MESMA
     contagem (soma dos dois) tanto na tela de Filmes quanto na de Séries —
     confuso quando os números não batiam com o que a listagem filtrada por
     tipo realmente trazia."""
-    q = db.query(VodTitle.genre, func.count(VodTitle.id)).filter(
-        or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None))
-    )
+    q = db.query(VodTitle.genre, func.count(VodTitle.id))
+    if not include_adult:
+        q = q.filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
     if type in ("movie", "series"):
         q = q.filter(VodTitle.type == type)
     rows = q.group_by(VodTitle.genre).all()
