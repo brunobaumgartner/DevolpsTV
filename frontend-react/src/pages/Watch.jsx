@@ -38,7 +38,11 @@ function episodeLabel(item) {
 
 // quantas vezes tenta o próximo mirror antes de desistir e mostrar erro —
 // evita loop infinito se todos os mirrors do canal estiverem fora do ar.
-const MAX_MIRROR_RETRIES = 3;
+// Achado em 2026-09-13: com 3, um provedor inteiro marcado (falsamente)
+// como "não saudável" pelo health-check quase nunca era alcançado, mesmo
+// funcionando bem pro navegador real -- ranking por saúde só ordena, não
+// filtra, então mais tentativas dão chance de chegar nesses mirrors.
+const MAX_MIRROR_RETRIES = 6;
 
 function WatchChannel({ tvgId }) {
   const { data } = useFetch("channels", () => api.channels());
