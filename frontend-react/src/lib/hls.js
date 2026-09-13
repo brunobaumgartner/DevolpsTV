@@ -49,7 +49,32 @@ export async function attachHls(video, url, onFatal) {
   }
   // arquivo direto (.mp4/.ts) ou sem suporte a MSE
   video.src = viaMediaProxyIfNeeded(url);
-  video.onerror = onFatal || null;
+  attachDirectRetry(video, onFatal);
+}
+
+// achado em 2026-09-13: video.onerror do elemento <video> disparava
+// IMEDIATAMENTE em qualquer falha transitória (handshake lento, timeout de
+// conexão momentâneo) e, com múltiplos mirrors, isso fazia o player pular
+// pro próximo servidor sem dar chance do atual terminar de conectar --
+// antes de existir fallback automático, o próprio navegador tinha esse
+// tempo (5-10s) pra tentar de novo sozinho. Agora: dá até 2 chances de
+// recarregar o MESMO link (video.load(), com um intervalo) antes de
+// considerar fatal de verdade e avisar o mirror seguinte.
+const DIRECT_RETRY_ATTEMPTS = 2;
+const DIRECT_RETRY_DELAY_MS = 2000;
+
+function attachDirectRetry(video, onFatal) {
+  let retries = 0;
+  video.onerror = () => {
+    if (retries < DIRECT_RETRY_ATTEMPTS) {
+      retries += 1;
+      setTimeout(() => {
+        if (video.isConnected) video.load();
+      }, DIRECT_RETRY_DELAY_MS);
+      return;
+    }
+    onFatal?.();
+  };
 }
 
 export function detachHls(video) {
