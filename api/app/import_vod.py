@@ -37,8 +37,11 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy.orm import joinedload
+
 from .db import SessionLocal
 from .models import VodItem, VodTitle
+from .vod_mirrors import upsert_mirror
 
 REQUIRED_COLUMNS = {"type", "title"}
 VALID_TYPES = {"movie", "series"}
@@ -123,7 +126,12 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
         title_cache[key] = vod_title
 
         if vod_title.id not in items_cache:
-            existing_items = db.query(VodItem).filter(VodItem.title_id == vod_title.id).all()
+            existing_items = (
+                db.query(VodItem)
+                .options(joinedload(VodItem.streams))
+                .filter(VodItem.title_id == vod_title.id)
+                .all()
+            )
             items_cache[vod_title.id] = {(it.season_number, it.episode_number): it for it in existing_items}
 
         season = _clean_int(row.get("season_number"))
@@ -139,9 +147,10 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
                 season_number=season,
                 episode_number=episode,
                 episode_title=episode_title,
-                stream_url=stream_url,
             )
             db.add(item)
+            db.flush()  # garante item.id pro mirror abaixo
+            upsert_mirror(db, item, stream_url)
             items_cache[vod_title.id][item_key] = item
             stats["itens_novos"] += 1
         else:
@@ -149,9 +158,12 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             if episode_title is not None and item.episode_title != episode_title:
                 item.episode_title = episode_title
                 changed = True
-            # stream_url em branco no CSV NUNCA apaga um link já salvo
-            if stream_url is not None and item.stream_url != stream_url:
-                item.stream_url = stream_url
+            # link em branco no CSV NUNCA apaga um mirror já salvo; um link
+            # DIFERENTE do que já existe vira mirror adicional, não substitui
+            # (o mesmo episódio às vezes tem fontes diferentes que caem em
+            # horários diferentes — manter os dois aumenta a chance de sempre
+            # ter um funcionando)
+            if upsert_mirror(db, item, stream_url):
                 changed = True
             if changed:
                 stats["itens_atualizados"] += 1

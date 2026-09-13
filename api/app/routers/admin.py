@@ -32,6 +32,7 @@ from ..import_channels import get_import_job as get_import_channels_job, start_i
 from ..manual_healthcheck import get_healthcheck_job, start_healthcheck_job
 from ..models import AccessToken, AdminUser, Channel, GenreKeyword, Stream, VodItem, VodTitle, WorkerRun
 from ..system_info import snapshot as system_snapshot
+from ..vod_mirrors import upsert_mirror
 
 router = APIRouter(prefix="/admin")
 
@@ -309,7 +310,10 @@ def add_movie(payload: MovieRequest, db: Session = Depends(get_db), _admin: Admi
     )
     db.add(title)
     db.flush()
-    db.add(VodItem(title_id=title.id, stream_url=payload.stream_url))
+    item = VodItem(title_id=title.id)
+    db.add(item)
+    db.flush()
+    upsert_mirror(db, item, payload.stream_url)
     db.commit()
     return {"id": title.id}
 
@@ -333,15 +337,15 @@ def add_series(payload: SeriesRequest, db: Session = Depends(get_db), _admin: Ad
         v is not None for v in (payload.season_number, payload.episode_number, payload.episode_title, payload.stream_url)
     )
     if has_episode_data:
-        db.add(
-            VodItem(
-                title_id=title.id,
-                season_number=payload.season_number,
-                episode_number=payload.episode_number,
-                episode_title=payload.episode_title,
-                stream_url=payload.stream_url,
-            )
+        item = VodItem(
+            title_id=title.id,
+            season_number=payload.season_number,
+            episode_number=payload.episode_number,
+            episode_title=payload.episode_title,
         )
+        db.add(item)
+        db.flush()
+        upsert_mirror(db, item, payload.stream_url)
 
     db.commit()
     return {"id": title.id}
@@ -363,9 +367,10 @@ def add_episode(
         season_number=payload.season_number,
         episode_number=payload.episode_number,
         episode_title=payload.episode_title,
-        stream_url=payload.stream_url,
     )
     db.add(item)
+    db.flush()
+    upsert_mirror(db, item, payload.stream_url)
     db.commit()
     return {"id": item.id}
 
@@ -381,7 +386,11 @@ def update_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Item não encontrado")
 
+    # edição manual no admin é uma correção deliberada: vira o link "principal"
+    # (cache em stream_url) e também entra como mirror pro resolve/health-check
+    # — sem apagar mirrors que já existiam (podem ter vindo de outra fonte/CSV)
     item.stream_url = payload.stream_url
+    upsert_mirror(db, item, payload.stream_url)
     if payload.episode_title is not None:
         item.episode_title = payload.episode_title
     db.commit()

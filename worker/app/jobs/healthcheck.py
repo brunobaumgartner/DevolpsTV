@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from ..config import HEALTHCHECK_MAX_WORKERS, HEALTHCHECK_TIMEOUT_SEC
 from ..db import SessionLocal
 from ..job_tracking import track_job
-from ..models import Stream, VodItem
+from ..models import Stream, VodStream
 from ..stream_validation import stream_is_really_playable
 
 logger = logging.getLogger("iptv-worker.healthcheck")
@@ -36,28 +36,27 @@ def run():
     db = SessionLocal()
     try:
         streams = db.query(Stream).all()
-        # VOD: só um lote rotativo dos mais desatualizados por ciclo
+        # VOD: só um lote rotativo dos mirrors mais desatualizados por ciclo
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=VOD_STALE_HOURS)
-        vod_items = (
-            db.query(VodItem)
-            .filter(VodItem.stream_url.isnot(None))
-            .filter(or_(VodItem.last_checked_at.is_(None), VodItem.last_checked_at < cutoff))
-            .order_by(VodItem.last_checked_at.is_(None).desc(), VodItem.last_checked_at.asc())
+        vod_streams = (
+            db.query(VodStream)
+            .filter(or_(VodStream.last_checked_at.is_(None), VodStream.last_checked_at < cutoff))
+            .order_by(VodStream.last_checked_at.is_(None).desc(), VodStream.last_checked_at.asc())
             .limit(VOD_BATCH)
             .all()
         )
 
-        if not streams and not vod_items:
+        if not streams and not vod_streams:
             logger.info("Nenhum link cadastrado ainda, pulando health-check.")
             return {"streams": 0, "saudaveis": 0, "vod_itens": 0, "vod_saudaveis": 0}
 
         logger.info(
-            "Testando %d streams + %d itens VOD (max_workers=%d)...",
-            len(streams), len(vod_items), HEALTHCHECK_MAX_WORKERS,
+            "Testando %d streams + %d mirrors VOD (max_workers=%d)...",
+            len(streams), len(vod_streams), HEALTHCHECK_MAX_WORKERS,
         )
 
         tasks = [("stream", s.id, s.url, s.referrer, s.user_agent) for s in streams]
-        tasks += [("vod", v.id, v.stream_url, None, None) for v in vod_items]
+        tasks += [("vod", v.id, v.url, None, None) for v in vod_streams]
         results: dict[tuple[str, int], bool] = {}
 
         with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
@@ -81,23 +80,23 @@ def run():
                 healthy_count += 1
 
         vod_healthy_count = 0
-        for item in vod_items:
-            healthy = results.get(("vod", item.id), False)
-            item.is_healthy = healthy
-            item.last_checked_at = now
-            item.consecutive_failures = 0 if healthy else item.consecutive_failures + 1
+        for vs in vod_streams:
+            healthy = results.get(("vod", vs.id), False)
+            vs.is_healthy = healthy
+            vs.last_checked_at = now
+            vs.consecutive_failures = 0 if healthy else vs.consecutive_failures + 1
             if healthy:
                 vod_healthy_count += 1
 
         db.commit()
         logger.info(
-            "Health-check concluído: %d/%d streams saudáveis, %d/%d itens VOD saudáveis.",
-            healthy_count, len(streams), vod_healthy_count, len(vod_items),
+            "Health-check concluído: %d/%d streams saudáveis, %d/%d mirrors VOD saudáveis.",
+            healthy_count, len(streams), vod_healthy_count, len(vod_streams),
         )
         return {
             "streams": len(streams),
             "saudaveis": healthy_count,
-            "vod_itens": len(vod_items),
+            "vod_itens": len(vod_streams),
             "vod_saudaveis": vod_healthy_count,
         }
     except Exception:

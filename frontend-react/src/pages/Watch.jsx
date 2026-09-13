@@ -1,4 +1,4 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { useFetch } from "../lib/useFetch.js";
 import { api } from "../lib/api.js";
 import { navigate } from "../lib/router.jsx";
@@ -30,6 +30,16 @@ function fmtHour(iso) {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// "T1E2" ou "T1E2 — Nome do episódio" quando o episódio tem título
+function episodeLabel(item) {
+  const num = `T${item.season_number ?? "?"}E${item.episode_number ?? "?"}`;
+  return item.episode_title ? `${num} — ${item.episode_title}` : num;
+}
+
+// quantas vezes tenta o próximo mirror antes de desistir e mostrar erro —
+// evita loop infinito se todos os mirrors do canal estiverem fora do ar.
+const MAX_MIRROR_RETRIES = 3;
+
 function WatchChannel({ tvgId }) {
   const { data } = useFetch("channels", () => api.channels());
   const channel = (data?.channels || []).find((c) => c.tvg_id === tvgId);
@@ -38,6 +48,10 @@ function WatchChannel({ tvgId }) {
   const [lang, setLang] = useState(null);
   const [url, setUrl] = useState(null);
   const [status, setStatus] = useState("Verificando…");
+  const urlRef = useRef(null); // último url tocado, pro report-failure saber qual mirror falhou
+  // sempre aponta pro onFatal da execução atual do efeito (closure com o
+  // `attempts` certo) — o VideoBox guarda uma única função estável.
+  const onFatalRef = useRef(() => {});
 
   const langs = channel?.languages || [];
 
@@ -46,16 +60,38 @@ function WatchChannel({ tvgId }) {
     const chosen = lang || (langs.find((g) => g.label === "Português") || langs[0])?.label || null;
     if (lang !== chosen) setLang(chosen);
     let alive = true;
-    setStatus(`Verificando "${channel.name}"${chosen && langs.length > 1 ? " (" + chosen + ")" : ""}…`);
-    setUrl(null);
-    api
-      .resolve(channel.tvg_id, langs.length > 1 ? chosen : null)
-      .then((r) => {
-        if (!alive) return;
-        setUrl(r.url);
-        setStatus(`Reproduzindo: ${channel.name}`);
-      })
-      .catch((e) => alive && setStatus(e.message || `"${channel.name}" indisponível agora.`));
+    let attempts = 0;
+
+    function tryResolve() {
+      setStatus(`Verificando "${channel.name}"${chosen && langs.length > 1 ? " (" + chosen + ")" : ""}…`);
+      setUrl(null);
+      urlRef.current = null;
+      api
+        .resolve(channel.tvg_id, langs.length > 1 ? chosen : null)
+        .then((r) => {
+          if (!alive) return;
+          urlRef.current = r.url;
+          setUrl(r.url);
+          setStatus(`Reproduzindo: ${channel.name}`);
+        })
+        .catch((e) => alive && setStatus(e.message || `"${channel.name}" indisponível agora.`));
+    }
+
+    function onFatal() {
+      if (!alive) return;
+      if (urlRef.current) api.reportFailure(channel.tvg_id, urlRef.current);
+      attempts += 1;
+      if (attempts >= MAX_MIRROR_RETRIES) {
+        setUrl(null);
+        setStatus("Falha ao reproduzir — nenhum mirror funcionou.");
+        return;
+      }
+      setStatus(`Falhou, tentando outro servidor (${attempts}/${MAX_MIRROR_RETRIES})…`);
+      tryResolve();
+    }
+
+    onFatalRef.current = onFatal;
+    tryResolve();
     return () => {
       alive = false;
     };
@@ -73,7 +109,7 @@ function WatchChannel({ tvgId }) {
       <BackBar>{channel.name}</BackBar>
       <div class="bg-black">
         {url ? (
-          <VideoBox url={url} class="w-full max-w-[1100px] mx-auto aspect-video bg-black" onFatal={() => setStatus("Falha ao reproduzir.")} />
+          <VideoBox url={url} class="w-full max-w-[1100px] mx-auto aspect-video bg-black" onFatal={() => onFatalRef.current()} />
         ) : (
           <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center text-muted text-sm relative overflow-hidden">
             {channel.backdrop_url && (
@@ -154,7 +190,55 @@ function WatchChannel({ tvgId }) {
 // ---------- FILME / SÉRIE ----------
 function WatchVod({ id }) {
   const { data, loading, error } = useFetch(`vod-${id}`, () => api.vodDetail(id));
-  const [current, setCurrent] = useState(null); // {url, label, itemId}
+  const [current, setCurrent] = useState(null); // {label, itemId} — seleção, sem url ainda
+  const [playUrl, setPlayUrl] = useState(null); // url já verificada, pronta pra tocar
+  const [vodStatus, setVodStatus] = useState("");
+  const playUrlRef = useRef(null); // último url tocado, pro report-failure saber qual mirror falhou
+  const onFatalRef = useRef(() => {});
+
+  // resolve (testa mirrors de verdade) sempre que o item selecionado muda —
+  // mesmo fluxo/fallback que a TV ao vivo já usa.
+  useEffect(() => {
+    if (!current) {
+      setPlayUrl(null);
+      return;
+    }
+    let alive = true;
+    let attempts = 0;
+
+    function tryResolve() {
+      setVodStatus("Verificando…");
+      setPlayUrl(null);
+      playUrlRef.current = null;
+      api
+        .vodResolve(current.itemId)
+        .then((r) => {
+          if (!alive) return;
+          playUrlRef.current = r.url;
+          setPlayUrl(r.url);
+          setVodStatus("");
+        })
+        .catch((e) => alive && setVodStatus(e.message || "Indisponível agora."));
+    }
+
+    function onFatal() {
+      if (!alive) return;
+      if (playUrlRef.current) api.vodReportFailure(current.itemId, playUrlRef.current);
+      attempts += 1;
+      if (attempts >= MAX_MIRROR_RETRIES) {
+        setPlayUrl(null);
+        setVodStatus("Falha ao reproduzir — nenhum mirror funcionou.");
+        return;
+      }
+      tryResolve();
+    }
+
+    onFatalRef.current = onFatal;
+    tryResolve();
+    return () => {
+      alive = false;
+    };
+  }, [current?.itemId]);
 
   // primeiro play: filme -> item[0]; série -> episódio salvo, senão 1º disponível
   useEffect(() => {
@@ -162,15 +246,14 @@ function WatchVod({ id }) {
     const prog = data.progress;
     if (data.type === "movie") {
       const m = data.items[0];
-      if (m?.stream_url) setCurrent({ url: m.stream_url, label: data.title, itemId: m.id });
+      if (m?.available) setCurrent({ label: data.title, itemId: m.id });
       else setCurrent(null);
       return;
     }
-    let ep = prog?.item_id && data.items.find((i) => i.id === prog.item_id && i.stream_url);
-    if (!ep) ep = data.items.find((i) => i.stream_url);
+    let ep = prog?.item_id && data.items.find((i) => i.id === prog.item_id && i.available);
+    if (!ep) ep = data.items.find((i) => i.available);
     if (ep) {
-      const lbl = `T${ep.season_number ?? "?"}E${ep.episode_number ?? "?"}`;
-      setCurrent({ url: ep.stream_url, label: `${data.title} — ${lbl}`, itemId: ep.id });
+      setCurrent({ label: `${data.title} — ${episodeLabel(ep)}`, itemId: ep.id });
     } else {
       setCurrent(null);
     }
@@ -195,15 +278,19 @@ function WatchVod({ id }) {
       <BackBar>{t.title}</BackBar>
 
       <div class="bg-black">
-        {current ? (
+        {playUrl ? (
           <VideoBox
-            url={current.url}
+            url={playUrl}
             startAt={startAt}
             onTime={reportProgress}
+            onFatal={() => onFatalRef.current()}
             class="w-full max-w-[1100px] mx-auto aspect-video bg-black"
           />
         ) : (
-          <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center">
+          <div class="w-full max-w-[1100px] mx-auto aspect-video grid place-items-center relative">
+            {current && vodStatus && (
+              <span class="absolute bottom-3 text-muted text-sm">{vodStatus}</span>
+            )}
             {t.poster_url ? (
               <img src={t.poster_url} class="h-full object-contain opacity-60" />
             ) : (
@@ -234,7 +321,7 @@ function WatchVod({ id }) {
             return (
               <button
                 disabled={!i.available}
-                onClick={() => setCurrent({ url: i.stream_url, label: `${t.title} — ${label}`, itemId: i.id })}
+                onClick={() => setCurrent({ label: `${t.title} — ${episodeLabel(i)}`, itemId: i.id })}
                 class={
                   "shrink-0 snap-start w-[190px] rounded-md border bg-card p-3 text-left transition-transform disabled:opacity-40 " +
                   (active ? "border-accent" : "border-border hover:border-accent hover:-translate-y-0.5")

@@ -12,7 +12,9 @@ from .models import Channel, Stream
 CLIENT_FAILURE_SUPPRESS_MINUTES = 30
 
 
-def _is_client_suppressed(stream: Stream) -> bool:
+def _is_client_suppressed(stream) -> bool:
+    """Genérico: vale tanto pra `Stream` (canal) quanto `VodStream` (filme/
+    episódio) — os dois têm os mesmos campos `client_failed_at`."""
     if stream.client_failed_at is None:
         return False
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=CLIENT_FAILURE_SUPPRESS_MINUTES)
@@ -22,16 +24,26 @@ def _is_client_suppressed(stream: Stream) -> bool:
     return failed_at > cutoff
 
 
+def rank_mirrors(candidates):
+    """Ordena uma lista de mirrors (objetos com `is_healthy`,
+    `consecutive_failures`, `last_checked_at`, `client_failed_at` — `Stream`
+    ou `VodStream`) do melhor pro pior, descartando os não-saudáveis e os
+    suprimidos por falha real recente reportada pelo navegador. Genérico pra
+    ser reaproveitado pelo VOD (`vod_mirrors.py`) sem duplicar a regra de
+    ranking já usada pelos canais ao vivo."""
+    healthy = [s for s in candidates if s.is_healthy and not _is_client_suppressed(s)]
+    if not healthy:
+        return []
+    fallback = datetime(2000, 1, 1)
+    healthy.sort(key=lambda s: (s.consecutive_failures, -(s.last_checked_at or fallback).timestamp()))
+    return healthy
+
+
 def _ranked_streams(channel: Channel):
     """Todos os mirrors saudáveis de um canal (e sem reporte recente de falha real
     do navegador de um usuário), do melhor pro pior (menos falhas seguidas,
     checado mais recentemente primeiro)."""
-    candidates = [s for s in channel.streams if s.is_healthy and not _is_client_suppressed(s)]
-    if not candidates:
-        return []
-    fallback = datetime(2000, 1, 1)
-    candidates.sort(key=lambda s: (s.consecutive_failures, -(s.last_checked_at or fallback).timestamp()))
-    return candidates
+    return rank_mirrors(channel.streams)
 
 
 def _best_stream(channel: Channel):

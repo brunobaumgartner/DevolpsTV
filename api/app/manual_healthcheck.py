@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from .db import SessionLocal
 from .job_registry import is_cancelled, register
-from .models import Stream, VodItem, WorkerRun
+from .models import Stream, VodStream, WorkerRun
 from .stream_validation import stream_is_really_playable
 
 HEALTHCHECK_TIMEOUT_SEC = 6
@@ -81,16 +81,15 @@ def start_healthcheck_job() -> str:
         db = SessionLocal()
         try:
             streams = db.query(Stream).all()
-            # cap: o catálogo VOD tem centenas de milhares de itens; testa um
+            # cap: o catálogo VOD tem centenas de milhares de mirrors; testa um
             # lote dos mais desatualizados (o botão pode ser clicado de novo)
-            vod_items = (
-                db.query(VodItem)
-                .filter(VodItem.stream_url.isnot(None))
-                .order_by(VodItem.last_checked_at.is_(None).desc(), VodItem.last_checked_at.asc())
+            vod_streams = (
+                db.query(VodStream)
+                .order_by(VodStream.last_checked_at.is_(None).desc(), VodStream.last_checked_at.asc())
                 .limit(8000)
                 .all()
             )
-            total = len(streams) + len(vod_items)
+            total = len(streams) + len(vod_streams)
             with _jobs_lock:
                 _jobs[job_id]["total"] = total
 
@@ -101,7 +100,7 @@ def start_healthcheck_job() -> str:
                 return
 
             tasks = [("stream", s.id, s.url, s.referrer, s.user_agent) for s in streams]
-            tasks += [("vod", v.id, v.stream_url, None, None) for v in vod_items]
+            tasks += [("vod", v.id, v.url, None, None) for v in vod_streams]
             results: dict[tuple[str, int], bool] = {}
 
             with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
@@ -136,11 +135,11 @@ def start_healthcheck_job() -> str:
                     healthy_count += 1
 
             vod_healthy_count = 0
-            for item in vod_items:
-                healthy = results.get(("vod", item.id), False)
-                item.is_healthy = healthy
-                item.last_checked_at = now
-                item.consecutive_failures = 0 if healthy else item.consecutive_failures + 1
+            for vs in vod_streams:
+                healthy = results.get(("vod", vs.id), False)
+                vs.is_healthy = healthy
+                vs.last_checked_at = now
+                vs.consecutive_failures = 0 if healthy else vs.consecutive_failures + 1
                 if healthy:
                     vod_healthy_count += 1
 
@@ -151,7 +150,7 @@ def start_healthcheck_job() -> str:
             _record_worker_run(
                 "ok",
                 f"streams={len(streams)}, saudaveis={healthy_count}, "
-                f"vod_itens={len(vod_items)}, vod_saudaveis={vod_healthy_count} (manual)",
+                f"vod_mirrors={len(vod_streams)}, vod_saudaveis={vod_healthy_count} (manual)",
                 time.monotonic() - start,
             )
         except Exception as e:

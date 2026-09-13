@@ -61,6 +61,17 @@ export const api = {
         body: JSON.stringify({ url }),
       }
     ).catch(() => {}),
+
+  vodResolve: (itemId) => req(`p/${encodeURIComponent(_token)}/vod/items/${itemId}/resolve`),
+  vodReportFailure: (itemId, url) =>
+    fetch(
+      BASE + `p/${encodeURIComponent(_token)}/vod/items/${itemId}/report-failure`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }
+    ).catch(() => {}),
 };
 
 // --- admin (sessão por cookie) ---

@@ -56,14 +56,29 @@ class Program(Base):
 
 
 class VodItem(Base):
-    """Cópia mínima do model da API — o worker só precisa disso pra testar a
-    saúde dos links de VOD no healthcheck periódico, não pra gerenciar
-    filme/série (isso é só na API/admin)."""
+    """Cópia mínima do model da API — o worker só precisa disso pra saber que
+    a tabela existe (FK de VodStream); quem carrega pro healthcheck periódico
+    é VodStream agora (1 linha por mirror, não por item)."""
 
     __tablename__ = "vod_items"
 
     id = Column(Integer, primary_key=True)
     stream_url = Column(String(1000))
+    is_healthy = Column(Boolean)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    last_checked_at = Column(DateTime)
+
+
+class VodStream(Base):
+    """Cópia mínima do model da API — mirror de um VodItem (ver models.py da
+    API pra explicação completa). O worker só precisa disso pra testar a
+    saúde de cada link no healthcheck periódico."""
+
+    __tablename__ = "vod_streams"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("vod_items.id", ondelete="CASCADE"), nullable=False)
+    url = Column(String(1000), nullable=False)
     is_healthy = Column(Boolean)
     consecutive_failures = Column(Integer, nullable=False, default=0)
     last_checked_at = Column(DateTime)

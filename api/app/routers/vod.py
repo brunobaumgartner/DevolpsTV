@@ -3,6 +3,7 @@ você (ver README.md "Adicionando títulos ao catálogo VOD") conforme for
 conseguindo autorização pra cada obra — nenhum worker popula isso
 automaticamente, e nenhuma fonte externa é consultada aqui."""
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -11,10 +12,16 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
-from ..models import AccessToken, VodItem, VodTitle, WatchProgress
+from ..live_check import resolve_live_url
+from ..models import AccessToken, VodItem, VodStream, VodTitle, WatchProgress
 from ..security import require_valid_token
+from ..vod_mirrors import ranked_mirror_urls
 
 router = APIRouter()
+
+
+class FailureReport(BaseModel):
+    url: str
 
 # valor especial no filtro de gênero pra "títulos sem gênero"
 GENRE_NONE = "Outros"
@@ -187,12 +194,60 @@ def vod_detail(
                 "episode_title": i.episode_title,
                 "available": i.stream_url is not None,
                 # a URL só é revelada aqui, no detalhe de um título específico já
-                # autenticado por token — não aparece na listagem geral
+                # autenticado por token — não aparece na listagem geral. Mantida
+                # por compatibilidade (play imediato); o player deve preferir
+                # /resolve, que testa os mirrors de verdade na hora de tocar.
                 "stream_url": i.stream_url,
             }
             for i in items
         ],
     }
+
+
+@router.get("/p/{token}/vod/items/{item_id}/resolve")
+def resolve_vod_item(
+    token: str,
+    item_id: int,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Mesma ideia do /resolve de canal ao vivo: testa os mirrors do item AGORA
+    (não pelo cache do health-check periódico) e devolve o primeiro que
+    responder de verdade. Permite ter mais de um link por filme/episódio
+    (ex: vindos de fontes/CSVs diferentes) com fallback automático."""
+    item = db.query(VodItem).options(joinedload(VodItem.streams)).filter(VodItem.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
+
+    candidates = ranked_mirror_urls(item)
+    live_url = resolve_live_url(candidates)
+    if live_url is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Nenhum dos {len(candidates)} link(s) desse item respondeu agora.",
+        )
+    return {"item_id": item_id, "url": live_url, "checked_mirrors": len(candidates)}
+
+
+@router.post("/p/{token}/vod/items/{item_id}/report-failure")
+def report_vod_failure(
+    token: str,
+    item_id: int,
+    report: FailureReport,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Chamado pelo frontend quando o player realmente falhou em tocar um
+    mirror (mesmo depois do /resolve ter aprovado) — mesmo mecanismo do
+    report-failure de canal ao vivo (ver channels.py)."""
+    stream = db.query(VodStream).filter(VodStream.item_id == item_id, VodStream.url == report.url).first()
+    if stream is None:
+        raise HTTPException(status_code=404, detail="Mirror não encontrado nesse item")
+
+    stream.client_failed_at = datetime.now(timezone.utc)
+    stream.client_failure_count += 1
+    db.commit()
+    return {"ok": True, "client_failure_count": stream.client_failure_count}
 
 
 # ---------------- "Continuar assistindo" ----------------

@@ -121,6 +121,29 @@ class VodItem(Base):
     last_checked_at = Column(DateTime)
 
     vod_title = relationship("VodTitle", back_populates="items")
+    streams = relationship("VodStream", back_populates="item", cascade="all, delete-orphan")
+
+
+class VodStream(Base):
+    """Mirror de um VodItem — mesmo papel que `Stream` tem pra `Channel`: mais
+    de um link por filme/episódio, health-check e fallback independentes por
+    link. `VodItem.stream_url` continua existindo só como cache do melhor
+    mirror atual (pra não quebrar quem lê esse campo direto); a fonte de
+    verdade pra ranking/fallback é esta tabela."""
+
+    __tablename__ = "vod_streams"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("vod_items.id", ondelete="CASCADE"), nullable=False)
+    url = Column(String(1000), nullable=False)
+    is_healthy = Column(Boolean)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    last_checked_at = Column(DateTime)
+    client_failed_at = Column(DateTime)
+    client_failure_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+    item = relationship("VodItem", back_populates="streams")
 
 
 class WatchProgress(Base):
