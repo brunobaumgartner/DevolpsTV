@@ -12,7 +12,10 @@ export function AdminCadastroCanais() {
         accept=".csv,text/csv"
         upload={adminApi.importChannelsCsv}
         status={adminApi.importChannelsCsvStatus}
-        formatDone={(st) => `Importado: ${st.canais_novos ?? 0} canal(is) novo(s), ${st.canais_atualizados ?? 0} atualizado(s), ${st.links_novos ?? 0} link(s) novo(s).`}
+        formatDone={(st) =>
+          `Importado: ${st.canais_novos ?? 0} canal(is) novo(s), ${st.canais_atualizados ?? 0} atualizado(s), ${st.links_novos ?? 0} link(s) novo(s).` +
+          (st.linhas_lixo?.length ? ` ${st.linhas_lixo.length} linha(s) barrada(s) por parecer lixo (separador/aviso da fonte, não canal de verdade).` : "")
+        }
       />
       <p class="text-xs text-muted">
         Pra ver, editar ou apagar o que já foi cadastrado, use a aba{" "}

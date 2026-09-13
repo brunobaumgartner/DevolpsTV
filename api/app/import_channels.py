@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 
+from .channel_quality import is_junk_channel_name
 from .db import SessionLocal
 from .models import Channel, Stream
 
@@ -119,7 +120,7 @@ def _preload_streams(db, channel_cache: dict[str, Channel]) -> dict[str, dict[st
 
 
 def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
-    stats = {"canais_novos": 0, "canais_atualizados": 0, "links_novos": 0, "linhas_ignoradas": []}
+    stats = {"canais_novos": 0, "canais_atualizados": 0, "links_novos": 0, "linhas_ignoradas": [], "linhas_lixo": []}
 
     channel_cache = _preload_channels(db, rows)
     streams_cache = _preload_streams(db, channel_cache)
@@ -147,6 +148,11 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             if not name:
                 stats["linhas_ignoradas"].append(i)
                 continue
+            if is_junk_channel_name(name):
+                # separador/aviso/decoração da playlist original, não canal de
+                # verdade (ver channel_quality.py) -- nem cria a linha
+                stats["linhas_lixo"].append(i)
+                continue
             channel = Channel(
                 tvg_id=tvg_id, name=name, category=category, logo_url=logo_url,
                 is_broadcast_tv=is_broadcast_tv, is_active=True,
@@ -157,7 +163,7 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             streams_cache[tvg_key] = {}
         else:
             changed = False
-            if name and channel.name != name:
+            if name and channel.name != name and not is_junk_channel_name(name):
                 channel.name = name
                 changed = True
             if category and channel.category != category:
