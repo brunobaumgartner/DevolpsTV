@@ -1,0 +1,122 @@
+"""Consolida VodItems duplicados -- mesmo (title_id, season_number,
+episode_number) registrado mais de uma vez, um por fonte de importação, em
+vez de UM item com os vários links como mirrors (VodStream).
+
+Achado em 2026-09-13 investigando por que "2 Cachorros Bobos" (e muita coisa
+mais) dava "esse item não tem nenhum link cadastrado" mesmo tendo outra fonte
+saudável pro mesmo episódio: o app resolve mirror por ITEM específico
+(/vod/items/{id}/resolve, e o "continuar assistindo" grava o item_id exato).
+Cada fonte de CSV virou um VodItem separado pro mesmo episódio, então quando
+o único link daquele item específico falhava (client_failed_at), o
+fallback automático nunca enxergava o link bom do "item irmão" -- é
+tecnicamente outro registro, não um mirror do mesmo.
+
+253.160 grupos duplicados, 526.817 itens afetados na 1ª medição -- processa
+em chunks de títulos (não de linhas) pra manter uso de memória baixo, já que
+cada grupo pode ter vários itens e preciso ver todos juntos pra decidir quem
+sobrevive.
+
+Idempotente: rodar de novo não muda nada (não sobra grupo com mais de 1 item)."""
+
+import sys
+from collections import defaultdict
+
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload
+
+from .db import SessionLocal
+from .models import VodItem, VodStream, WatchProgress
+
+_TITLE_CHUNK = 300
+
+
+def _distinct_title_ids_with_dupes(db) -> list[int]:
+    rows = (
+        db.query(VodItem.title_id)
+        .filter(VodItem.season_number.isnot(None))
+        .group_by(VodItem.title_id, VodItem.season_number, VodItem.episode_number)
+        .having(func.count(VodItem.id) > 1)
+        .all()
+    )
+    return sorted({r[0] for r in rows})
+
+
+def _dedupe_group(db, items: list[VodItem]) -> int:
+    """`items`: todos os VodItem do mesmo (title_id, season, episode), 2+.
+    Mantém o de menor id, migra os streams (e o stream_url legado) dos
+    outros pra ele -- sem duplicar URL já presente --, apaga o resto.
+    Devolve quantos itens foram removidos."""
+    items.sort(key=lambda i: i.id)
+    survivor, dupes = items[0], items[1:]
+
+    existing_urls = {s.url for s in survivor.streams}
+    if survivor.stream_url:
+        existing_urls.add(survivor.stream_url)
+
+    for dupe in dupes:
+        for stream in list(dupe.streams):
+            if stream.url in existing_urls:
+                db.delete(stream)
+            else:
+                stream.item_id = survivor.id
+                existing_urls.add(stream.url)
+        if dupe.stream_url and dupe.stream_url not in existing_urls:
+            db.add(VodStream(item_id=survivor.id, url=dupe.stream_url))
+            existing_urls.add(dupe.stream_url)
+
+    dupe_ids = [d.id for d in dupes]
+    db.query(WatchProgress).filter(WatchProgress.item_id.in_(dupe_ids)).update(
+        {WatchProgress.item_id: survivor.id}, synchronize_session=False
+    )
+    db.query(VodItem).filter(VodItem.id.in_(dupe_ids)).delete(synchronize_session=False)
+    return len(dupes)
+
+
+def run(db=None, progress_every=20) -> dict:
+    owns_session = db is None
+    db = db or SessionLocal()
+    stats = {"titulos_processados": 0, "grupos_consolidados": 0, "itens_removidos": 0}
+    try:
+        title_ids = _distinct_title_ids_with_dupes(db)
+        total_titles = len(title_ids)
+
+        for i in range(0, total_titles, _TITLE_CHUNK):
+            chunk = title_ids[i : i + _TITLE_CHUNK]
+            items = (
+                db.query(VodItem)
+                .options(joinedload(VodItem.streams))
+                .filter(VodItem.title_id.in_(chunk))
+                .filter(VodItem.season_number.isnot(None))
+                .all()
+            )
+            grouped: dict[tuple, list[VodItem]] = defaultdict(list)
+            for item in items:
+                grouped[(item.title_id, item.season_number, item.episode_number)].append(item)
+
+            for group in grouped.values():
+                if len(group) > 1:
+                    removed = _dedupe_group(db, group)
+                    stats["grupos_consolidados"] += 1
+                    stats["itens_removidos"] += removed
+
+            db.commit()
+            db.expunge_all()
+            stats["titulos_processados"] += len(chunk)
+            if (i // _TITLE_CHUNK) % progress_every == 0:
+                print(
+                    f"  ... {stats['titulos_processados']}/{total_titles} títulos, "
+                    f"{stats['itens_removidos']} itens removidos até agora",
+                    file=sys.stderr,
+                )
+
+        return stats
+    finally:
+        if owns_session:
+            db.close()
+
+
+if __name__ == "__main__":
+    result = run()
+    print("Consolidação de episódios duplicados concluída:")
+    for k, v in result.items():
+        print(f"  {k}: {v}")
