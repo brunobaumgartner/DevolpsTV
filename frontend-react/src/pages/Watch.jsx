@@ -45,9 +45,16 @@ function episodeLabel(item) {
 const MAX_MIRROR_RETRIES = 6;
 
 function WatchChannel({ tvgId }) {
-  const { data } = useFetch("channels", () => api.channels());
-  const channel = (data?.channels || []).find((c) => c.tvg_id === tvgId);
+  // busca o canal ESPECÍFICO (antes procurava dentro da lista de
+  // /channels.json, que virou paginada -- qualquer canal fora da 1ª página
+  // caía em "Canal não encontrado", ou seja, quase todos)
+  const { data: channel, loading, error } = useFetch(`channel-${tvgId}`, () => api.channelDetail(tvgId));
   const epg = useFetch(channel ? `epg-${tvgId}` : null, () => api.epg(tvgId), { enabled: !!channel });
+  const sameCatList = useFetch(
+    channel?.category ? `channels-cat-${channel.category}` : null,
+    () => api.channels({ category: channel.category, limit: 21 }),
+    { enabled: !!channel?.category }
+  );
 
   const [lang, setLang] = useState(null);
   const [url, setUrl] = useState(null);
@@ -101,11 +108,11 @@ function WatchChannel({ tvgId }) {
     };
   }, [channel?.tvg_id, lang]);
 
-  if (!data) return <div class="p-8 text-muted text-sm">Carregando…</div>;
-  if (!channel) return <div class="p-8 text-danger text-sm">Canal não encontrado ou fora do ar.</div>;
+  if (loading) return <div class="p-8 text-muted text-sm">Carregando…</div>;
+  if (error || !channel) return <div class="p-8 text-danger text-sm">Canal não encontrado ou fora do ar.</div>;
 
-  const sameCat = (data.channels || [])
-    .filter((c) => c.tvg_id !== channel.tvg_id && c.category === channel.category)
+  const sameCat = (sameCatList.data?.channels || [])
+    .filter((c) => c.tvg_id !== channel.tvg_id)
     .slice(0, 20);
 
   return (

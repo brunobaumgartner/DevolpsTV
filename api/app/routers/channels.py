@@ -49,6 +49,35 @@ def _visible_channels_query(db: Session, hide_adult: bool = True):
     return q
 
 
+def _serialize_channel(channel: Channel, program=None):
+    """Item de canal como o frontend espera. Devolve None quando o canal não
+    tem nenhum mirror utilizável no momento (todos suprimidos por falha real
+    reportada pelo navegador)."""
+    streams = _ranked_streams(channel)[:3]
+    if not streams:
+        return None
+    # idiomas disponíveis pro canal (Português primeiro). Se só tiver 1, o
+    # frontend nem mostra seletor.
+    languages = ranked_streams_by_language(channel)
+    return {
+        "tvg_id": channel.tvg_id,
+        "name": channel.name,
+        "logo_url": channel.logo_url,
+        "backdrop_url": channel.backdrop_url,
+        "description": channel.description,
+        "category": channel.category,
+        "category_label": category_label(channel.category),
+        "is_broadcast_tv": channel.is_broadcast_tv,
+        # stream_url / stream_urls: mantidos por compatibilidade — apontam pro
+        # 1º idioma da lista (Português quando existe)
+        "stream_url": languages[0]["stream_urls"][0] if languages else streams[0].url,
+        "stream_urls": languages[0]["stream_urls"] if languages else [s.url for s in streams],
+        "languages": languages,
+        "quality": streams[0].quality,
+        "now_playing": {"title": program.title, "ends_at": program.end_time.isoformat()} if program else None,
+    }
+
+
 def _category_counts(db: Session, hide_adult: bool = True):
     """[(categoria_ou_CATEGORY_NONE, count)] do maior pro menor, escopado aos
     canais visíveis. Compartilhado entre /channels/categories e /channels/home
@@ -103,34 +132,9 @@ def list_channels(
 
     items = []
     for channel in page_channels:
-        streams = _ranked_streams(channel)[:3]
-        if not streams:
-            continue
-        program = now_playing.get(channel.id)
-        # idiomas disponíveis pro canal (Português primeiro). Se só tiver 1, o
-        # frontend nem mostra seletor — comportamento idêntico ao de antes.
-        languages = ranked_streams_by_language(channel)
-        items.append(
-            {
-                "tvg_id": channel.tvg_id,
-                "name": channel.name,
-                "logo_url": channel.logo_url,
-                "backdrop_url": channel.backdrop_url,
-                "description": channel.description,
-                "category": channel.category,
-                "category_label": category_label(channel.category),
-                "is_broadcast_tv": channel.is_broadcast_tv,
-                # stream_url / stream_urls: mantidos por compatibilidade — apontam
-                # pro 1º idioma da lista (Português quando existe)
-                "stream_url": languages[0]["stream_urls"][0] if languages else streams[0].url,
-                "stream_urls": languages[0]["stream_urls"] if languages else [s.url for s in streams],
-                "languages": languages,
-                "quality": streams[0].quality,
-                "now_playing": {"title": program.title, "ends_at": program.end_time.isoformat()}
-                if program
-                else None,
-            }
-        )
+        item = _serialize_channel(channel, now_playing.get(channel.id))
+        if item is not None:
+            items.append(item)
     return {"count": total, "channels": items}
 
 
@@ -204,6 +208,33 @@ def channels_home(
         rows.append({"category": cat, "label": category_label(None if cat == CATEGORY_NONE else cat), "channels": _serialize(channels)})
 
     return {"live_now": _serialize(live_channels), "rows": rows}
+
+
+# IMPORTANTE: esta rota precisa ficar DEPOIS de /channels/categories e
+# /channels/home -- o Starlette casa por ordem de registro, e "{tvg_id}"
+# capturaria "categories"/"home" se viesse antes (mesma pegadinha já
+# encontrada no admin.py em 2026-09-13).
+@router.get("/p/{token}/channels/{tvg_id}")
+def channel_detail(
+    token: str,
+    tvg_id: str,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Detalhe de UM canal pelo tvg_id. Existe porque a tela de assistir
+    precisa do canal específico e a listagem virou paginada (achado em
+    2026-09-13: o player procurava o canal dentro da lista de /channels.json,
+    que passou a trazer só a 1ª página -- qualquer canal fora dela dava
+    "Canal não encontrado ou fora do ar", ou seja, quase todos)."""
+    channel = db.query(Channel).filter(Channel.tvg_id == tvg_id, Channel.is_active.is_(True)).first()
+    if channel is None or (channel.category == ADULT_CATEGORY and _hide_adult(_access)):
+        raise HTTPException(status_code=404, detail="Canal não encontrado")
+
+    now_playing = now_playing_map(db, [channel.id])
+    item = _serialize_channel(channel, now_playing.get(channel.id))
+    if item is None:
+        raise HTTPException(status_code=503, detail="Esse canal não tem nenhum mirror disponível agora.")
+    return item
 
 
 @router.get("/p/{token}/channels/{tvg_id}/resolve")

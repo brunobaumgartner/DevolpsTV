@@ -26,6 +26,7 @@ export const api = {
   channels: (params = {}) =>
     req(`p/${encodeURIComponent(_token)}/channels.json?${new URLSearchParams(params)}`),
   channelCategories: () => req(`p/${encodeURIComponent(_token)}/channels/categories`),
+  channelDetail: (tvgId) => req(`p/${encodeURIComponent(_token)}/channels/${encodeURIComponent(tvgId)}`),
   channelsHome: (perCategory = 20) =>
     req(`p/${encodeURIComponent(_token)}/channels/home?per_category=${perCategory}`),
   vod: (params = {}) =>
