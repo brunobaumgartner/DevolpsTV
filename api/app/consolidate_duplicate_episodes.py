@@ -99,6 +99,13 @@ def run(db=None, progress_every=20) -> dict:
     try:
         title_ids = _distinct_title_ids_with_dupes(db)
         total_titles = len(title_ids)
+        # commit por CONTAGEM DE GRUPOS processados, não por título -- achado
+        # em 2026-09-13: um único chunk de 100 títulos pode esconder um título
+        # gigante (novela com 1000+ episódios/duplicatas) e prender a
+        # transação inteira acumulando dezenas de milhares de linhas
+        # travadas antes do commit no fim do chunk
+        _GROUP_COMMIT_EVERY = 200
+        groups_since_commit = 0
 
         for i in range(0, total_titles, _TITLE_CHUNK):
             chunk = title_ids[i : i + _TITLE_CHUNK]
@@ -128,8 +135,18 @@ def run(db=None, progress_every=20) -> dict:
                 except _RETRYABLE:
                     stats["grupos_com_erro_concorrencia"] += 1
 
+                groups_since_commit += 1
+                if groups_since_commit >= _GROUP_COMMIT_EVERY:
+                    db.commit()
+                    groups_since_commit = 0
+                    print(
+                        f"  ... (commit parcial) {stats['itens_removidos']} itens removidos até agora",
+                        file=sys.stderr,
+                    )
+
             db.commit()
             db.expunge_all()
+            groups_since_commit = 0
             stats["titulos_processados"] += len(chunk)
             if (i // _TITLE_CHUNK) % progress_every == 0:
                 print(
