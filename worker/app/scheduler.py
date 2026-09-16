@@ -1,5 +1,6 @@
 import logging
 
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from .config import EPG_FETCH_INTERVAL_MIN, FETCH_CHANNELS_INTERVAL_MIN, HEALTHCHECK_INTERVAL_MIN
@@ -9,7 +10,14 @@ logger = logging.getLogger("iptv-worker.scheduler")
 
 
 def run_forever():
-    scheduler = BlockingScheduler(timezone="UTC")
+    # 1 thread só: os jobs rodam UM DE CADA VEZ, nunca em paralelo.
+    # Achado em 2026-09-14: fetch_epg e fetch_fast_meta estão no mesmo
+    # intervalo (3h) e começavam com 15s de diferença, mas o fetch_epg leva
+    # ~2min — os dois se atropelavam apagando/inserindo na MESMA tabela
+    # (programs, `DELETE ... WHERE channel_id IN (...)` nos dois), e o
+    # fetch_fast_meta morria com "Deadlock found when trying to get lock".
+    # Serializar também tira o pico de CPU de dois jobs pesados juntos.
+    scheduler = BlockingScheduler(timezone="UTC", executors={"default": ThreadPoolExecutor(1)})
 
     scheduler.add_job(
         fetch_channels.run,

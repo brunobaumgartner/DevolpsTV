@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from .db import SessionLocal
 from .job_registry import is_cancelled, register
 from .models import Stream, VodStream, WorkerRun
-from .stream_validation import stream_is_really_playable
+from .stream_validation import INCONCLUSIVO, MORTO, OK, check_stream
 
 HEALTHCHECK_TIMEOUT_SEC = 6
 # cada mirror bate num servidor DIFERENTE (não é uma API central tipo TMDB) —
@@ -40,14 +40,13 @@ HEALTHCHECK_MAX_WORKERS = 60
 VOD_CHUNK_SIZE = 20000
 
 
-def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, bool]:
+def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, str]:
     headers = {}
     if user_agent:
         headers["User-Agent"] = user_agent
     if referrer:
         headers["Referer"] = referrer
-    healthy = stream_is_really_playable(url, HEALTHCHECK_TIMEOUT_SEC, headers)
-    return row_id, healthy
+    return row_id, check_stream(url, HEALTHCHECK_TIMEOUT_SEC, headers)
 
 
 def _record_worker_run(status: str, summary: str, duration: float):
@@ -100,26 +99,34 @@ def start_healthcheck_job() -> str:
             if kind == "stream"
             else [(s.id, s.url, None, None) for s in rows]
         )
-        results: dict[int, bool] = {}
+        results: dict[int, str] = {}
         with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
             futures = {pool.submit(_check_stream, rid, url, ref, ua): rid for rid, url, ref, ua in tasks}
             for future in as_completed(futures):
-                rid, healthy = future.result()
-                results[rid] = healthy
+                rid, estado = future.result()
+                results[rid] = estado
                 with _jobs_lock:
                     _jobs[job_id]["processed"] += 1
-                    if healthy:
+                    if estado == OK:
                         _jobs[job_id]["healthy"] += 1
 
         now = datetime.now(timezone.utc)
         healthy_count = 0
         for row in rows:
-            healthy = results.get(row.id, False)
-            row.is_healthy = healthy
+            # INCONCLUSIVO grava NULL (desconhecido), não False — ver
+            # stream_validation.check_stream: o teste sai do IP da VPS e link
+            # bloqueado aqui pode estar perfeito no navegador do usuário
+            estado = results.get(row.id, INCONCLUSIVO)
             row.last_checked_at = now
-            row.consecutive_failures = 0 if healthy else row.consecutive_failures + 1
-            if healthy:
+            if estado == OK:
+                row.is_healthy = True
+                row.consecutive_failures = 0
                 healthy_count += 1
+            elif estado == MORTO:
+                row.is_healthy = False
+                row.consecutive_failures = row.consecutive_failures + 1
+            else:
+                row.is_healthy = None
         db.commit()
         return healthy_count
 

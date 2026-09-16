@@ -14,6 +14,9 @@ coluna):
   seguintes do mesmo canal pode deixar em branco
 - category, logo_url: opcionais, só atualiza quando vem preenchido (nunca
   apaga um valor já salvo colocando célula vazia)
+- language: opcional, idioma do canal — aceita código ou nome ("pt",
+  "Português", "portuguese"). Valor não reconhecido é ignorado (ver
+  app/languages.py pra lista aceita)
 - is_broadcast_tv: "1"/"true"/"sim"/"yes" (qualquer outra coisa ou vazio =
   não). Uma vez marcado true pra aquele canal, fica true (mesma regra do
   formulário "Adicionar canal")
@@ -30,6 +33,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 
+from . import languages
 from .channel_quality import is_junk_channel_name
 from .db import SessionLocal
 from .models import Channel, Stream
@@ -70,6 +74,15 @@ def _clean(value):
 def _clean_bool(value):
     value = _clean(value)
     return bool(value) and value.lower() in _TRUE_VALUES
+
+
+def _clean_language(value):
+    """Idioma não reconhecido é ignorado em vez de derrubar o arquivo inteiro
+    (mesma regra do import_vod)."""
+    try:
+        return languages.aceita(_clean(value))
+    except ValueError:
+        return None
 
 
 _PRELOAD_CHUNK = 2000
@@ -141,6 +154,7 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
 
         name = _clean(row.get("name"))
         category = _clean(row.get("category"))
+        language = _clean_language(row.get("language"))
         logo_url = _clean(row.get("logo_url"))
         is_broadcast_tv = _clean_bool(row.get("is_broadcast_tv"))
 
@@ -154,7 +168,7 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
                 stats["linhas_lixo"].append(i)
                 continue
             channel = Channel(
-                tvg_id=tvg_id, name=name, category=category, logo_url=logo_url,
+                tvg_id=tvg_id, name=name, category=category, language=language, logo_url=logo_url,
                 is_broadcast_tv=is_broadcast_tv, is_active=True,
             )
             db.add(channel)  # sem flush: FK do stream resolvida via relacionamento abaixo
@@ -168,6 +182,9 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
                 changed = True
             if category and channel.category != category:
                 channel.category = category
+                changed = True
+            if language and channel.language != language:
+                channel.language = language
                 changed = True
             if logo_url and channel.logo_url != logo_url:
                 channel.logo_url = logo_url

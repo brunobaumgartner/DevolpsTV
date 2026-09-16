@@ -20,6 +20,9 @@ de coluna):
   episódios do MESMO título, não títulos duplicados
 - description, poster_url, genre, year: opcionais, só pro título (repetir ou
   deixar em branco nas linhas de episódio, tanto faz)
+- language: opcional, idioma do título — aceita código ou nome ("pt",
+  "Português", "portuguese"). Valor não reconhecido é ignorado (ver
+  app/languages.py pra lista aceita)
 - season_number, episode_number, episode_title: só fazem sentido pra "series"
   (deixe em branco pra "movie")
 - stream_url: o link do stream. Pode deixar em branco se ainda não tem
@@ -42,6 +45,7 @@ from sqlalchemy import tuple_
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload
 
+from . import languages
 from .db import SessionLocal
 from .models import VodItem, VodTitle
 from .vod_mirrors import upsert_mirror
@@ -105,6 +109,16 @@ def _clean_int(value):
         return None
     try:
         return int(value)
+    except ValueError:
+        return None
+
+
+def _clean_language(value):
+    """Normaliza pro código canônico (aceita "pt", "Português", "portuguese").
+    Valor não reconhecido é ignorado em vez de derrubar o arquivo inteiro —
+    uma célula torta no meio de 20 mil linhas não pode matar a importação."""
+    try:
+        return languages.aceita(_clean(value))
     except ValueError:
         return None
 
@@ -193,11 +207,18 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
         description = _clean(row.get("description"))
         poster_url = _clean(row.get("poster_url"))
         genre = _clean(row.get("genre"))
+        language = _clean_language(row.get("language"))
         year = _clean_int(row.get("year"))
 
         if vod_title is None:
             vod_title = VodTitle(
-                type=vod_type, title=title_name, description=description, poster_url=poster_url, genre=genre, year=year
+                type=vod_type,
+                title=title_name,
+                description=description,
+                poster_url=poster_url,
+                genre=genre,
+                language=language,
+                year=year,
             )
             db.add(vod_title)
             stats["titulos_novos"] += 1
@@ -205,7 +226,13 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
             items_cache[key] = {}
         else:
             changed = False
-            for field, value in (("description", description), ("poster_url", poster_url), ("genre", genre), ("year", year)):
+            for field, value in (
+                ("description", description),
+                ("poster_url", poster_url),
+                ("genre", genre),
+                ("language", language),
+                ("year", year),
+            ):
                 if value is not None and getattr(vod_title, field) != value:
                     setattr(vod_title, field, value)
                     changed = True

@@ -8,27 +8,50 @@ from ..config import HEALTHCHECK_MAX_WORKERS, HEALTHCHECK_TIMEOUT_SEC
 from ..db import SessionLocal
 from ..job_tracking import track_job
 from ..models import Stream, VodStream
-from ..stream_validation import stream_is_really_playable
+from ..stream_validation import INCONCLUSIVO, MORTO, OK, check_stream
 
 logger = logging.getLogger("iptv-worker.healthcheck")
 
 # o catálogo VOD tem centenas de milhares de itens — testar todos a cada
 # ciclo levaria horas. Cada rodada pega só um LOTE dos mais desatualizados
-# (nunca checados ou checados há +VOD_STALE_HOURS). Assim o catálogo inteiro
-# roda em ~1 dia sem cada ciclo estourar o tempo.
+# (nunca checados ou checados há +VOD_STALE_HOURS), priorizando os que nunca
+# foram vistos. Com 578 mil mirrors e 1 rodada por hora, uma passada completa
+# leva ~2,5 dias — de propósito: o teste de VOD a partir da VPS é quase todo
+# inconclusivo (ver stream_validation.check_stream), então correr mais rápido
+# só gastaria CPU sem produzir informação melhor.
 VOD_BATCH = 10000
 VOD_STALE_HOURS = 18
 
 
-def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, bool]:
+def _check_stream(row_id: int, url: str, referrer: str | None, user_agent: str | None) -> tuple[int, str]:
     headers = {}
     if user_agent:
         headers["User-Agent"] = user_agent
     if referrer:
         headers["Referer"] = referrer
 
-    healthy = stream_is_really_playable(url, HEALTHCHECK_TIMEOUT_SEC, headers)
-    return row_id, healthy
+    return row_id, check_stream(url, HEALTHCHECK_TIMEOUT_SEC, headers)
+
+
+def _aplicar(rows, results, kind, now) -> dict:
+    """Grava o resultado de cada link. INCONCLUSIVO vira is_healthy=NULL
+    (desconhecido) em vez de False: o teste sai do IP da VPS, e link que
+    responde página/403 aqui pode estar perfeito no navegador do usuário
+    (comprovado em 2026-09-14). Só MORTO conta como falha de verdade."""
+    contagem = {OK: 0, MORTO: 0, INCONCLUSIVO: 0}
+    for row in rows:
+        estado = results.get((kind, row.id), INCONCLUSIVO)
+        contagem[estado] += 1
+        row.last_checked_at = now
+        if estado == OK:
+            row.is_healthy = True
+            row.consecutive_failures = 0
+        elif estado == MORTO:
+            row.is_healthy = False
+            row.consecutive_failures = row.consecutive_failures + 1
+        else:
+            row.is_healthy = None  # não sabemos — quem decide é o cliente
+    return contagem
 
 
 @track_job("healthcheck")
@@ -57,7 +80,7 @@ def run():
 
         tasks = [("stream", s.id, s.url, s.referrer, s.user_agent) for s in streams]
         tasks += [("vod", v.id, v.url, None, None) for v in vod_streams]
-        results: dict[tuple[str, int], bool] = {}
+        results: dict[tuple[str, int], str] = {}
 
         with ThreadPoolExecutor(max_workers=HEALTHCHECK_MAX_WORKERS) as pool:
             futures = {
@@ -66,38 +89,28 @@ def run():
             }
             for future in as_completed(futures):
                 kind, row_id = futures[future]
-                _, healthy = future.result()
-                results[(kind, row_id)] = healthy
+                _, estado = future.result()
+                results[(kind, row_id)] = estado
 
         now = datetime.now(timezone.utc)
-        healthy_count = 0
-        for stream in streams:
-            healthy = results.get(("stream", stream.id), False)
-            stream.is_healthy = healthy
-            stream.last_checked_at = now
-            stream.consecutive_failures = 0 if healthy else stream.consecutive_failures + 1
-            if healthy:
-                healthy_count += 1
-
-        vod_healthy_count = 0
-        for vs in vod_streams:
-            healthy = results.get(("vod", vs.id), False)
-            vs.is_healthy = healthy
-            vs.last_checked_at = now
-            vs.consecutive_failures = 0 if healthy else vs.consecutive_failures + 1
-            if healthy:
-                vod_healthy_count += 1
+        ch = _aplicar(streams, results, "stream", now)
+        vod = _aplicar(vod_streams, results, "vod", now)
 
         db.commit()
         logger.info(
-            "Health-check concluído: %d/%d streams saudáveis, %d/%d mirrors VOD saudáveis.",
-            healthy_count, len(streams), vod_healthy_count, len(vod_streams),
+            "Health-check concluído. Canais: %d ok, %d mortos, %d inconclusivos. "
+            "VOD: %d ok, %d mortos, %d inconclusivos.",
+            ch[OK], ch[MORTO], ch[INCONCLUSIVO], vod[OK], vod[MORTO], vod[INCONCLUSIVO],
         )
         return {
             "streams": len(streams),
-            "saudaveis": healthy_count,
+            "saudaveis": ch[OK],
+            "mortos": ch[MORTO],
+            "inconclusivos": ch[INCONCLUSIVO],
             "vod_itens": len(vod_streams),
-            "vod_saudaveis": vod_healthy_count,
+            "vod_saudaveis": vod[OK],
+            "vod_mortos": vod[MORTO],
+            "vod_inconclusivos": vod[INCONCLUSIVO],
         }
     except Exception:
         db.rollback()

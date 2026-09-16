@@ -6,7 +6,14 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Intervalos dos jobs (minutos)
 FETCH_CHANNELS_INTERVAL_MIN = 360  # 6h
-HEALTHCHECK_INTERVAL_MIN = 15
+# 1h (era 15min): medido em 2026-09-14, cada rodada leva ~4min testando 1049
+# streams + 10 mil mirrors VOD — a cada 15min isso era mais de 25% do tempo
+# com o MySQL sob carga, e os picos de CPU do servidor eram esse job. Em 1h
+# cai pra ~7%. O catálogo VOD passa a levar ~2,5 dias por passada completa
+# (578 mil mirrors / 10 mil por rodada), o que é aceitável: o teste de VOD
+# feito daqui é majoritariamente INCONCLUSIVO mesmo (ver stream_validation),
+# então o valor dele é achar link morto de verdade, não medir saúde real.
+HEALTHCHECK_INTERVAL_MIN = 60
 EPG_FETCH_INTERVAL_MIN = 180  # 3h — a fonte (BrazilTVEPG) atualiza ~5x/dia
 
 # Timeout por stream testado no health-check (segundos)

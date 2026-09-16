@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from .. import languages
 from ..db import get_db
 from ..categories_pt import category_label
 from ..epg import now_playing_map, upcoming_programs
@@ -78,6 +79,23 @@ def _serialize_channel(channel: Channel, program=None):
     }
 
 
+LANGUAGE_NONE = languages.NONE_LABEL
+
+
+def _language_counts(db: Session, hide_adult: bool = True):
+    rows = (
+        _visible_channels_query(db, hide_adult=hide_adult)
+        .with_entities(Channel.language, func.count(Channel.id))
+        .group_by(Channel.language)
+        .all()
+    )
+    named = sorted(((l, n) for l, n in rows if l), key=lambda x: -x[1])
+    none_n = sum(n for l, n in rows if l is None)
+    if none_n:
+        named.append((LANGUAGE_NONE, none_n))
+    return named
+
+
 def _category_counts(db: Session, hide_adult: bool = True):
     """[(categoria_ou_CATEGORY_NONE, count)] do maior pro menor, escopado aos
     canais visíveis. Compartilhado entre /channels/categories e /channels/home
@@ -100,6 +118,7 @@ def list_channels(
     token: str,
     response: Response,
     category: Optional[str] = None,
+    language: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -109,13 +128,20 @@ def list_channels(
     """Listagem paginada e filtrada no servidor (achado em 2026-09-13: essa
     rota devolvia os ~56 mil canais ativos de uma vez, com streams/EPG/idiomas
     calculados pra cada um — era isso que deixava a tela de TV ao vivo lenta;
-    o filtro por categoria/busca e a paginação ficavam todos no navegador)."""
+    o filtro por categoria/busca e a paginação ficavam todos no navegador).
+    `language` filtra pelo idioma do CONTEÚDO do canal (Channel.language,
+    recuperado dos dados originais de importação) -- não confundir com
+    `?lang=` do /resolve, que escolhe entre mirrors de ÁUDIO do mesmo canal."""
     response.headers["Cache-Control"] = "public, max-age=120"
     base = _visible_channels_query(db, hide_adult=_hide_adult(_access))
     if category == CATEGORY_NONE:
         base = base.filter(Channel.category.is_(None))
     elif category:
         base = base.filter(Channel.category == category)
+    if language == LANGUAGE_NONE:
+        base = base.filter(Channel.language.is_(None))
+    elif language:
+        base = base.filter(Channel.language == language)
     if q:
         base = base.filter(Channel.name.ilike(f"%{q.strip()}%"))
 
@@ -154,6 +180,25 @@ def list_channel_categories(
         "categories": [
             {"category": c, "label": category_label(None if c == CATEGORY_NONE else c), "count": n}
             for c, n in _category_counts(db, hide_adult=_hide_adult(_access))
+        ]
+    }
+
+
+@router.get("/p/{token}/channels/languages")
+def list_channel_languages(
+    token: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Idiomas disponíveis com contagem, do maior pro menor -- usado pelo
+    seletor de idioma da tela de TV ao vivo (pedido do produto em
+    2026-09-13). Só aparece pro usuário quando há mais de 1 idioma real."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {
+        "languages": [
+            {"language": l, "label": languages.label(None if l == LANGUAGE_NONE else l), "count": n}
+            for l, n in _language_counts(db, hide_adult=_hide_adult(_access))
         ]
     }
 
