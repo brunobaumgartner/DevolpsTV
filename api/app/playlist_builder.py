@@ -180,11 +180,17 @@ def _best_vod_url(item: VodItem, streams: list) -> str | None:
     return ranked[0].url if ranked else None
 
 
-# tamanho máximo de página mesmo se o chamador pedir mais -- nenhuma request
-# de VOD pode varrer o catálogo inteiro (achado real 2026-09-16: sem limite,
-# a m3u8 de VOD ficou com 265 mil entradas, 91MB e ~2min pra gerar, o que
-# estoura timeout de proxy/CDN e trava a maioria dos players externos)
-VOD_M3U_MAX_TITLES = 1000
+# M3U não tem conceito de "página" -- todo player espera a lista COMPLETA
+# daquele link de uma vez, então cortar em pedaços de N títulos quebra a
+# experiência (achado real 2026-09-16: com limite de 300, ?genre=Ação trazia
+# só 300 dos 1248 filmes de ação existentes). O teto que existe aqui não é
+# paginação, é proteção contra o cenário realmente caro: SÉRIE multiplica por
+# episódio (medido: todas as séries sem filtro = 976 mil linhas, 85MB, 89s --
+# perto do timeout de proxy/CDN de ~100s). FILME não tem esse problema (1
+# filme = 1 entrada): o catálogo inteiro de filmes, sem gênero nenhum, mede
+# 6,5MB / 10s -- seguro o bastante pra nunca ser limitado.
+VOD_M3U_SERIES_MAX_TITLES = 1000
+VOD_M3U_MOVIE_MAX_TITLES = 100_000  # bem acima do catálogo atual (~42k), só de teto de sanidade
 
 
 def _vod_titles_page(
@@ -192,13 +198,17 @@ def _vod_titles_page(
     type: str | None = None,  # noqa: A002 - nome claro pro chamador
     genre: str | None = None,
     hide_adult: bool = True,
-    limit: int = 300,
+    limit: int | None = None,
     offset: int = 0,
 ) -> list[VodTitle]:
     """Mesmo filtro de disponibilidade/gênero/adulto do GET /p/{token}/vod
     (routers/vod.py:list_vod), só que devolvendo os objetos `VodTitle` em vez
-    de dict -- reaproveitado aqui pra montar a playlist M3U de VOD sempre
-    escopada (nunca o catálogo inteiro de uma vez)."""
+    de dict -- reaproveitado aqui pra montar a playlist M3U de VOD.
+
+    `limit=None` (padrão) traz TODOS os títulos que baterem no filtro, até o
+    teto de segurança do tipo (ver VOD_M3U_SERIES_MAX_TITLES/
+    VOD_M3U_MOVIE_MAX_TITLES) -- só é limitação de verdade pro lado de série,
+    que é onde o catálogo inteiro fica pesado demais."""
     base = db.query(VodTitle).filter(VodTitle.items.any(VodItem.stream_url.isnot(None)))
     if hide_adult:
         base = base.filter(or_(VodTitle.genre != _ADULT_GENRE, VodTitle.genre.is_(None)))
@@ -209,7 +219,8 @@ def _vod_titles_page(
     elif genre:
         base = base.filter(VodTitle.genre == genre)
 
-    limit = max(1, min(limit, VOD_M3U_MAX_TITLES))
+    max_allowed = VOD_M3U_MOVIE_MAX_TITLES if type == "movie" else VOD_M3U_SERIES_MAX_TITLES
+    limit = max_allowed if limit is None else max(1, min(limit, max_allowed))
     return base.order_by(VodTitle.title).offset(offset).limit(limit).all()
 
 
@@ -218,16 +229,15 @@ def _vod_m3u_lines(
     type: str | None = None,  # noqa: A002 - nome claro pro chamador
     genre: str | None = None,
     hide_adult: bool = True,
-    limit: int = 300,
+    limit: int | None = None,
     offset: int = 0,
 ):
     """Filme = 1 entrada em group-title "Filmes". Série = cada TÍTULO vira o
     próprio group-title (assim os episódios ficam agrupados como "categoria"
     dentro do player externo, igual painel Xtream costuma fazer).
 
-    Sempre PAGINADO por título (`limit`/`offset`, tetado em
-    VOD_M3U_MAX_TITLES) e opcionalmente filtrado por `type`/`genre` -- nunca
-    monta o catálogo inteiro de uma vez (ver VOD_M3U_MAX_TITLES)."""
+    Traz a lista COMPLETA do filtro (`type`/`genre`) por padrão -- ver
+    _vod_titles_page pro motivo do teto ser diferente pra filme e série."""
     titles = _vod_titles_page(db, type, genre, hide_adult, limit, offset)
     title_ids = [t.id for t in titles]
     if not title_ids:
@@ -252,7 +262,11 @@ def _vod_m3u_lines(
             logo_attr = f' tvg-logo="{stream_escape(title.poster_url)}"' if title.poster_url else ""
 
             if title.type == "movie":
-                group = "Filmes"
+                # gênero como categoria (não "Filmes" fixo): o player organiza
+                # sozinho pelo group-title, então um link só com TODOS os
+                # filmes já aparece separado em categorias -- pedido do
+                # usuário em 2026-09-16, sem precisar de 1 link por gênero
+                group = f"Filmes - {title.genre}" if title.genre else "Filmes - Outros"
                 name = f"{title.title} ({title.year})" if title.year else title.title
             else:
                 group = title.title
@@ -267,9 +281,9 @@ def _vod_m3u_lines(
 
 
 def build_m3u(db: Session) -> str:
-    """Só TV ao vivo -- o VOD tem playlist própria e paginada, ver
-    build_vod_m3u (motivo: catálogo de VOD é grande demais pra caber numa
-    única lista, ver VOD_M3U_MAX_TITLES)."""
+    """Só TV ao vivo -- o VOD tem playlist própria, ver build_vod_m3u (motivo:
+    série sem filtro multiplica por episódio e fica grande demais pra caber
+    junto, ver VOD_M3U_SERIES_MAX_TITLES)."""
     lines = ["#EXTM3U"]
     for channel, stream in active_channels_with_stream(db):
         group = channel.category or "outros"
@@ -292,11 +306,11 @@ def build_vod_m3u(
     type: str | None = None,  # noqa: A002 - nome claro pro chamador
     genre: str | None = None,
     hide_adult: bool = True,
-    limit: int = 300,
+    limit: int | None = None,
     offset: int = 0,
 ) -> str:
-    """Playlist M3U só de VOD, sempre filtrada/paginada (ver _vod_m3u_lines).
-    Usada por um link separado do playlist.m3u8 principal."""
+    """Playlist M3U só de VOD (ver _vod_m3u_lines pro comportamento de
+    limit=None). Usada por um link separado do playlist.m3u8 principal."""
     lines = ["#EXTM3U"]
     lines.extend(_vod_m3u_lines(db, type=type, genre=genre, hide_adult=hide_adult, limit=limit, offset=offset))
     return "\n".join(lines) + "\n"
