@@ -19,10 +19,18 @@ from ..auth_admin import (
     require_login,
     verify_password,
 )
+from .. import languages
 from ..channel_classifier import get_classify_channels_job, start_classify_channels_job
 from ..dashboard import get_dashboard_stats
 from ..db import get_db
-from ..db_console import QueryError, describe_table, list_tables, run_query
+from ..db_console import (
+    QueryError,
+    describe_table,
+    get_write_job,
+    list_tables,
+    run_query,
+    start_write_job,
+)
 from ..genre_classifier import get_classify_job, start_classify_job
 from ..imdb_classifier import get_imdb_classify_job, is_dataset_available, start_imdb_classify_job
 from ..job_registry import list_jobs, prune, request_cancel
@@ -80,6 +88,10 @@ class UpdateItemRequest(BaseModel):
 
 class SetGenreRequest(BaseModel):
     genre: str
+
+
+class SetLanguageRequest(BaseModel):
+    language: Optional[str] = None  # None/"" limpa o idioma do título
 
 
 class LiveChannelRequest(BaseModel):
@@ -185,6 +197,7 @@ def admin_list_vod(
                 "title": t.title,
                 "poster_url": t.poster_url,
                 "genre": t.genre,
+                "language": t.language,
                 "year": t.year,
             }
             for t in titles
@@ -446,6 +459,30 @@ def update_item(
     return {"ok": True}
 
 
+@router.patch("/vod/titles/{title_id}/language")
+def set_title_language(
+    title_id: int,
+    payload: SetLanguageRequest,
+    db: Session = Depends(get_db),
+    _admin: AdminUser = Depends(require_admin),
+):
+    title = db.query(VodTitle).filter(VodTitle.id == title_id).first()
+    if title is None:
+        raise HTTPException(status_code=404, detail="Título não encontrado")
+    try:
+        title.language = languages.aceita(payload.language)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return {"ok": True, "language": title.language}
+
+
+@router.get("/languages")
+def admin_languages(_admin: AdminUser = Depends(require_admin)):
+    """Lista pro dropdown de idioma (canal e VOD usam a mesma)."""
+    return {"languages": languages.options()}
+
+
 @router.patch("/vod/titles/{title_id}/genre")
 def set_title_genre(
     title_id: int,
@@ -533,6 +570,7 @@ def add_live_channel(
 class ChannelUpdateRequest(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
+    language: Optional[str] = None
     logo_url: Optional[str] = None
     is_broadcast_tv: Optional[bool] = None
     is_active: Optional[bool] = None
@@ -612,6 +650,7 @@ def admin_channel_detail(channel_id: int, db: Session = Depends(get_db), _admin:
         "tvg_id": c.tvg_id,
         "name": c.name,
         "category": c.category,
+        "language": c.language,
         "logo_url": c.logo_url,
         "is_broadcast_tv": c.is_broadcast_tv,
         "is_active": c.is_active,
@@ -639,6 +678,13 @@ def admin_update_channel(
     if c is None:
         raise HTTPException(status_code=404, detail="Canal não encontrado")
     data = payload.model_dump(exclude_unset=True)
+    if "language" in data:
+        # normaliza/valida antes de gravar — idioma fora da lista vira 400 em
+        # vez de um valor que o filtro do site nunca encontraria
+        try:
+            data["language"] = languages.aceita(data["language"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     for field, value in data.items():
         setattr(c, field, value)
     db.commit()
@@ -916,6 +962,11 @@ class SqlQuery(BaseModel):
     sql: str
 
 
+class SqlWrite(BaseModel):
+    sql: str
+    confirm_full_table: bool = False
+
+
 @router.get("/db/tables")
 def db_tables(_admin: AdminUser = Depends(require_admin)):
     return {"tables": list_tables()}
@@ -937,6 +988,25 @@ def db_query(payload: SqlQuery, _admin: AdminUser = Depends(require_admin)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # erro de SQL do próprio banco
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}"[:400])
+
+
+@router.post("/db/execute")
+def db_execute(payload: SqlWrite, _admin: AdminUser = Depends(require_admin)):
+    """UPDATE/DELETE. Devolve job_id — o write roda em background porque em
+    tabela grande leva minutos (ver db_console)."""
+    try:
+        job_id = start_write_job(payload.sql, payload.confirm_full_table)
+    except QueryError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"job_id": job_id}
+
+
+@router.get("/db/execute/{job_id}/status")
+def db_execute_status(job_id: str, _admin: AdminUser = Depends(require_admin)):
+    job = get_write_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    return job
 
 
 # ---------------- Usuários do site (login admin/usuário) ----------------

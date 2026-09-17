@@ -26,6 +26,7 @@ export const api = {
   channels: (params = {}) =>
     req(`p/${encodeURIComponent(_token)}/channels.json?${new URLSearchParams(params)}`),
   channelCategories: () => req(`p/${encodeURIComponent(_token)}/channels/categories`),
+  channelLanguages: () => req(`p/${encodeURIComponent(_token)}/channels/languages`),
   channelDetail: (tvgId) => req(`p/${encodeURIComponent(_token)}/channels/${encodeURIComponent(tvgId)}`),
   channelsHome: (perCategory = 20) =>
     req(`p/${encodeURIComponent(_token)}/channels/home?per_category=${perCategory}`),
@@ -35,6 +36,8 @@ export const api = {
     req(`p/${encodeURIComponent(_token)}/vod/home?per_genre=${perGenre}`),
   vodGenres: (type) =>
     req(`p/${encodeURIComponent(_token)}/vod/genres${type ? `?type=${type}` : ""}`),
+  vodLanguages: (type) =>
+    req(`p/${encodeURIComponent(_token)}/vod/languages${type ? `?type=${type}` : ""}`),
   vodDetail: (id) => req(`p/${encodeURIComponent(_token)}/vod/${id}`),
   resolve: (tvgId, lang) =>
     req(
@@ -112,10 +115,13 @@ export const adminApi = {
   systemResources: () => req("admin/system/resources"),
   systemOsProcesses: () => req("admin/system/os-processes"),
 
-  // banco (consulta somente-leitura)
+  // banco: consulta (leitura) e execução (UPDATE/DELETE, roda como job)
   dbTables: () => req("admin/db/tables"),
   dbTable: (name) => req(`admin/db/tables/${encodeURIComponent(name)}`),
   dbQuery: (sql) => jpost("admin/db/query", { sql }),
+  dbExecute: (sql, confirmFullTable) =>
+    jpost("admin/db/execute", { sql, confirm_full_table: !!confirmFullTable }),
+  dbExecuteStatus: (jobId) => req(`admin/db/execute/${jobId}/status`),
 
   // usuários do site (login admin/usuário)
   users: () => req("admin/users"),
@@ -127,6 +133,8 @@ export const adminApi = {
   titlesWithoutGenre: (type, limit, offset) =>
     req(`admin/vod/titles-without-genre?type=${type}&limit=${limit}&offset=${offset}`),
   setTitleGenre: (id, genre) => jpatch(`admin/vod/titles/${id}/genre`, { genre }),
+  setTitleLanguage: (id, language) => jpatch(`admin/vod/titles/${id}/language`, { language }),
+  languages: () => req("admin/languages"),
 
   // genre-keywords
   genreKeywords: () => req("admin/genre-keywords"),

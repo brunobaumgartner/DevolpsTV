@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from .. import languages
 from ..db import get_db
 from ..models import AccessToken, VodItem, VodStream, VodTitle, WatchProgress
 from ..security import require_valid_token
@@ -24,6 +25,9 @@ class FailureReport(BaseModel):
 
 # valor especial no filtro de gênero pra "títulos sem gênero"
 GENRE_NONE = "Outros"
+
+# idem pra idioma (um <select> não consegue mandar NULL na query string)
+LANGUAGE_NONE = languages.NONE_LABEL
 
 # gênero "Adulto" só aparece (chip, listagem, busca, Home, detalhe, resolve)
 # pro token marcado com sees_adult_content -- todo token novo nasce sem essa
@@ -45,6 +49,7 @@ def list_vod(
     response: Response,
     type: Optional[str] = None,  # noqa: A002 - nome claro pro cliente
     genre: Optional[str] = None,
+    language: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -55,8 +60,15 @@ def list_vod(
     """Listagem paginada e filtrada no servidor. NÃO devolve os episódios/itens
     (era isso que deixava lento: 25k títulos puxavam 237k itens juntos) — a
     disponibilidade e a contagem de episódios vêm de agregados baratos, e a
-    lista de episódios só é carregada ao abrir um título (/vod/{id})."""
-    base = db.query(VodTitle)
+    lista de episódios só é carregada ao abrir um título (/vod/{id}).
+
+    Só lista título com pelo menos 1 item que tenha link (EXISTS, barato --
+    usa o índice de title_id, não precisa agregar nada) -- achado em
+    2026-09-13: sem esse filtro, título sem nenhum item disponível continuava
+    aparecendo normalmente na listagem, só marcado como "indisponível" no
+    campo `available`; ficava a critério do FRONTEND esconder, e ele não
+    escondia."""
+    base = db.query(VodTitle).filter(VodTitle.items.any(VodItem.stream_url.isnot(None)))
     if _hide_adult(_access):
         # genre != ADULT_GENRE sozinho excluiria também quem tem genre NULL
         # (NULL != 'Adulto' dá NULL em SQL, não TRUE) -- por isso o OR explícito
@@ -67,6 +79,10 @@ def list_vod(
         base = base.filter(VodTitle.genre.is_(None))
     elif genre:
         base = base.filter(VodTitle.genre == genre)
+    if language == LANGUAGE_NONE:
+        base = base.filter(VodTitle.language.is_(None))
+    elif language:
+        base = base.filter(VodTitle.language == language)
     if q:
         base = base.filter(VodTitle.title.ilike(f"%{q.strip()}%"))
 
@@ -107,6 +123,7 @@ def list_vod(
                 "title": t.title,
                 "poster_url": t.poster_url,
                 "genre": t.genre or GENRE_NONE,
+                "language": t.language,
                 "year": t.year,
                 "available": counts.get(t.id, (0, 0))[1] > 0,
                 "episode_count": counts.get(t.id, (0, 0))[0] if t.type == "series" else None,
@@ -127,7 +144,9 @@ def _genre_counts(db, type: Optional[str] = None, include_adult: bool = False): 
     contagem (soma dos dois) tanto na tela de Filmes quanto na de Séries —
     confuso quando os números não batiam com o que a listagem filtrada por
     tipo realmente trazia."""
-    q = db.query(VodTitle.genre, func.count(VodTitle.id))
+    q = db.query(VodTitle.genre, func.count(VodTitle.id)).filter(
+        VodTitle.items.any(VodItem.stream_url.isnot(None))
+    )
     if not include_adult:
         q = q.filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
     if type in ("movie", "series"):
@@ -160,6 +179,34 @@ def list_vod_genres(
     }
 
 
+@router.get("/p/{token}/vod/languages")
+def list_vod_languages(
+    token: str,
+    response: Response,
+    type: Optional[str] = None,  # noqa: A002 - nome claro pro cliente
+    db: Session = Depends(get_db),
+    _access: AccessToken = Depends(require_valid_token),
+):
+    """Idiomas do catálogo com contagem — alimenta o seletor de idioma das
+    telas de Filmes/Séries/Anime (mesmo formato do /channels/languages)."""
+    response.headers["Cache-Control"] = "public, max-age=300"
+    q = db.query(VodTitle.language, func.count(VodTitle.id)).filter(
+        VodTitle.items.any(VodItem.stream_url.isnot(None))
+    )
+    if _hide_adult(_access):
+        q = q.filter(or_(VodTitle.genre != ADULT_GENRE, VodTitle.genre.is_(None)))
+    if type in ("movie", "series"):
+        q = q.filter(VodTitle.type == type)
+    rows = q.group_by(VodTitle.language).all()
+
+    named = sorted(((l, c) for l, c in rows if l), key=lambda x: -x[1])
+    none_c = sum(c for l, c in rows if l is None)
+    out = [{"language": l, "label": languages.label(l), "count": c} for l, c in named]
+    if none_c:
+        out.append({"language": LANGUAGE_NONE, "label": LANGUAGE_NONE, "count": none_c})
+    return {"languages": out}
+
+
 @router.get("/p/{token}/vod/home")
 def vod_home(
     token: str,
@@ -174,7 +221,7 @@ def vod_home(
     requests, um por gênero). Sem itens/episódios."""
     out = []
     for genre, _count in _genre_counts(db, include_adult=not _hide_adult(_access))[:max_genres]:
-        q = db.query(VodTitle)
+        q = db.query(VodTitle).filter(VodTitle.items.any(VodItem.stream_url.isnot(None)))
         if genre == GENRE_NONE:
             q = q.filter(VodTitle.genre.is_(None))
         else:

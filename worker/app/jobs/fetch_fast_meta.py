@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from ..db import SessionLocal
+from ..db_retry import with_deadlock_retry
 from ..epg_sources import normalize_channel_name
 from ..job_tracking import track_job
 from ..models import Channel, Program, Stream
@@ -106,6 +107,13 @@ def _programs_to_rows(channel_id, programs):
 
 @track_job("fetch_fast_meta")
 def run():
+    # retry da execução INTEIRA (não só do commit): o enriquecimento dos
+    # canais mora na mesma transação que o EPG, então um rollback perde os
+    # dois — refazer do zero é o único jeito de não gravar pela metade
+    return with_deadlock_retry(_run_once, what="fetch_fast_meta")
+
+
+def _run_once():
     db = SessionLocal()
     try:
         channels = db.query(Channel).all()

@@ -1,7 +1,8 @@
 import { getToken } from "./api.js";
 
-// carrega hls.js só quando precisa (fora do bundle inicial)
+// carrega hls.js/mpegts.js só quando precisa (fora do bundle inicial)
 let _Hls = null;
+let _Mpegts = null;
 
 // alguns provedores (Pluto) servem o manifesto com CORS restrito -> passa
 // pelo nosso proxy (só o manifesto; os segmentos vão direto do CDN).
@@ -19,6 +20,22 @@ function viaMediaProxyIfNeeded(url) {
   if (location.protocol !== "https:" || !/^http:\/\//i.test(url)) return url;
   const t = getToken();
   return t ? `/iptv/p/${encodeURIComponent(t)}/media?url=${encodeURIComponent(url)}` : url;
+}
+
+// .ts cru (transport stream ao vivo, sem manifesto .m3u8) precisa ser lido
+// byte a byte em JavaScript (mpegts.js) pra virar algo que o <video> entenda
+// -- isso exige ler a resposta entre origens, o que os provedores quase nunca
+// autorizam via CORS. Por isso sempre passa pelo NOSSO domínio (mesma origem
+// da página, então CORS nem entra em jogo), igual o .m3u8 já fazia -- não dá
+// pra condicionar a "só se https" como o mp4 faz.
+function viaMediaProxyAlways(url) {
+  const t = getToken();
+  if (!t) return url;
+  // absoluta, não relativa: o mpegts.js busca dados de dentro de um Web
+  // Worker (enableWorker), e o worker (rodando a partir de um blob: URL)
+  // não consegue resolver caminho relativo -- "Failed to parse URL from
+  // /iptv/p/...". Achado em 2026-09-13 direto no console do navegador.
+  return `${location.origin}/iptv/p/${encodeURIComponent(t)}/media?url=${encodeURIComponent(url)}`;
 }
 
 // Quanto tempo esperar por QUALQUER dado do link antes de desistir dele.
@@ -109,6 +126,43 @@ export async function attachHls(video, url, onFatal) {
   startLoadWatchdog(video, fatalOnce);
 
   const isM3u8 = /\.m3u8(\?|$)/i.test(url) || /\/hls\?url=/.test(url);
+  // achado em 2026-09-13: canal com link .ts cru (sem .m3u8) tocava 0% das
+  // vezes mesmo quando o servidor confirmava o link saudável (200, bytes de
+  // vídeo de verdade) -- o <video src="...ts"> do Chrome/Firefox não sabe
+  // decodificar transport stream cru, só m3u8/mp4. Precisa do mpegts.js pra
+  // remuxar em algo que o MSE aceite, igual o hls.js faz pro .m3u8. Muita
+  // fonte desse tipo (padrão Xtream Codes) nem usa extensão ".ts" na URL --
+  // é só um caminho numérico opaco (ex: ".../192324/192324/4404") -- por
+  // isso a checagem é "não é m3u8 nem extensão de arquivo direto conhecida",
+  // não só "termina em .ts". Arquivo de VOD (filme/série) sempre tem
+  // extensão reconhecida, então continua indo pelo <video src> normal.
+  const hasDirectFileExt = /\.(mp4|mkv|avi|mov|webm|m4v)(\?|$)/i.test(url);
+  const isRawTs = !isM3u8 && !hasDirectFileExt;
+
+  if (isRawTs) {
+    if (!_Mpegts) {
+      // mpegts.js é um pacote CJS (`module.exports = ...`, sem export
+      // nomeado "default") -- o Rollup sintetiza um ".default" ao empacotar,
+      // mas no build de produção, pra esse chunk carregado por import()
+      // dinâmico, ele expôs o valor real sob uma propriedade minificada
+      // diferente (ex: "m") em vez de "default". Pegar o 1º valor do módulo
+      // funciona nos dois casos, sem depender do nome exato.
+      const mod = await import("mpegts.js");
+      _Mpegts = mod.default ?? Object.values(mod)[0];
+    }
+    if (_Mpegts.isSupported()) {
+      const player = _Mpegts.createPlayer(
+        { type: "mpegts", isLive: true, url: viaMediaProxyAlways(url) },
+        { enableWorker: true }
+      );
+      player.attachMediaElement(video);
+      player.on(_Mpegts.Events.ERROR, () => fatalOnce());
+      player.load();
+      player.play().catch(() => {});
+      video._mpegts = player;
+      return;
+    }
+  }
 
   if (isM3u8) {
     // Preferimos SEMPRE o hls.js quando há MSE (Chrome/Firefox/Android/desktop).
@@ -144,6 +198,12 @@ export function detachHls(video) {
       video._hls.destroy();
     } catch {}
     video._hls = null;
+  }
+  if (video?._mpegts) {
+    try {
+      video._mpegts.destroy();
+    } catch {}
+    video._mpegts = null;
   }
   if (video) video.onerror = null;
   video?.removeAttribute?.("src");

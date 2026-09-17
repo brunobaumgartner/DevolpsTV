@@ -16,6 +16,7 @@ export function VodList({ mode, params }) {
 
   const [q, setQ] = useState(query.q || "");
   const [genre, setGenre] = useState("");
+  const [lang, setLang] = useState(null);
   const [page, setPage] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +26,9 @@ export function VodList({ mode, params }) {
   // "Series | Netflix (22052)" aparecia idêntico nas duas, mesmo os títulos
   // sendo diferentes em cada uma)
   const genres = useFetch(`vod-genres-${type || "all"}`, () => api.vodGenres(type));
+  // idioma do conteúdo (VodTitle.language) — mesma ideia do seletor da TV ao
+  // vivo; só aparece quando o catálogo tem mais de um idioma pra escolher
+  const langs = useFetch(`vod-languages-${type || "all"}`, () => api.vodLanguages(type));
   const showGenreSelect = !fixedGenre;
 
   // debounce da busca -> reflete em ?q= e reseta a página
@@ -33,17 +37,18 @@ export function VodList({ mode, params }) {
       setPage(0);
       const base = "#" + location.hash.replace(/^#/, "").split("?")[0];
       history.replaceState(null, "", base + (q ? `?q=${encodeURIComponent(q)}` : ""));
-      fetchPage(0, q, genre);
+      fetchPage(0, q, genre, lang);
     }, 250);
     return () => clearTimeout(id);
-  }, [q, genre, mode, params?.nome]);
+  }, [q, genre, lang, mode, params?.nome]);
 
-  function fetchPage(p, qq = q, gg = genre) {
+  function fetchPage(p, qq = q, gg = genre, ll = lang) {
     setLoading(true);
     const p2 = {};
     if (type) p2.type = type;
     if (fixedGenre) p2.genre = fixedGenre;
     else if (gg) p2.genre = gg;
+    if (ll) p2.language = ll;
     if (qq) p2.q = qq;
     p2.limit = PAGE;
     p2.offset = p * PAGE;
@@ -77,6 +82,20 @@ export function VodList({ mode, params }) {
           placeholder="Buscar título…"
           class="flex-1 min-w-[160px] bg-[#081019] border border-border rounded px-3 py-1.5 text-sm"
         />
+        {(langs.data?.languages?.length || 0) > 1 && (
+          <select
+            value={lang || ""}
+            onChange={(e) => setLang(e.currentTarget.value || null)}
+            class="bg-[#081019] border border-border rounded px-2 py-1.5 text-sm text-muted"
+          >
+            <option value="">Todos os idiomas</option>
+            {langs.data.languages.map((l) => (
+              <option value={l.language}>
+                {l.label} ({l.count})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {showGenreSelect && (

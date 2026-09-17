@@ -105,25 +105,65 @@ function ResultTable({ data }) {
   );
 }
 
+const IS_WRITE = /^\s*(update|delete)\b/i;
+const HAS_WHERE = /\bwhere\b/i;
+
 export function AdminDb() {
   const [tables, setTables] = useState([]);
   const [sql, setSql] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [confirmFullTable, setConfirmFullTable] = useState(false);
+  const [writeResult, setWriteResult] = useState(null);
+
+  const isWrite = IS_WRITE.test(sql);
+  // sem WHERE, o alvo é a tabela inteira — pede confirmação explícita (a
+  // mesma regra vale no servidor, aqui é só pra avisar antes de mandar)
+  const needsConfirm = isWrite && !HAS_WHERE.test(sql);
 
   useEffect(() => {
     adminApi.dbTables().then((d) => setTables(d.tables || [])).catch(() => {});
   }, []);
+
+  // trocar a instrução zera a confirmação: marcar num DELETE e a caixa
+  // continuar marcada no próximo é exatamente como um acidente acontece
+  useEffect(() => {
+    setConfirmFullTable(false);
+  }, [sql]);
 
   async function runSql(q) {
     const query = q ?? sql;
     if (!query.trim()) return;
     setLoading(true);
     setData(null);
+    setWriteResult(null);
     try {
       setData(await adminApi.dbQuery(query));
     } catch (e) {
       setData({ error: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runWrite() {
+    if (!sql.trim()) return;
+    setLoading(true);
+    setData(null);
+    setWriteResult({ status: "running" });
+    try {
+      const { job_id } = await adminApi.dbExecute(sql, confirmFullTable);
+      // write em tabela grande leva minutos (o servidor roda em background
+      // justamente por isso) — aqui só acompanhamos até terminar
+      for (;;) {
+        const job = await adminApi.dbExecuteStatus(job_id);
+        setWriteResult(job);
+        if (job.status !== "running") break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      adminApi.dbTables().then((d) => setTables(d.tables || [])).catch(() => {});
+    } catch (e) {
+      setWriteResult({ status: "error", error: e.message });
     } finally {
       setLoading(false);
     }
@@ -162,20 +202,68 @@ export function AdminDb() {
             value={sql}
             onInput={(e) => setSql(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") runSql();
+              if (!((e.ctrlKey || e.metaKey) && e.key === "Enter")) return;
+              // atalho não dispara escrita que ainda precisa de confirmação
+              if (isWrite) {
+                if (!needsConfirm || confirmFullTable) runWrite();
+                return;
+              }
+              runSql();
             }}
             rows={4}
-            placeholder="SELECT * FROM vod_titles WHERE genre IS NULL LIMIT 50   —   (Ctrl+Enter roda · só leitura)"
+            placeholder="SELECT * FROM vod_titles WHERE genre IS NULL LIMIT 50   —   (Ctrl+Enter roda)"
             class="w-full bg-[#081019] border border-border rounded px-3 py-2 text-xs font-mono text-text"
           />
-          <div class="flex items-center gap-3 mt-2 mb-4">
-            <button class="btn" disabled={loading} onClick={() => runSql()}>
-              {loading ? "Rodando…" : "Rodar (Ctrl+Enter)"}
-            </button>
+          <div class="flex items-center flex-wrap gap-3 mt-2 mb-4">
+            {isWrite ? (
+              <button
+                class="btn bg-danger/20 border-danger text-danger hover:bg-danger/30"
+                disabled={loading || (needsConfirm && !confirmFullTable)}
+                onClick={runWrite}
+              >
+                {loading ? "Executando…" : "Executar escrita"}
+              </button>
+            ) : (
+              <button class="btn" disabled={loading} onClick={() => runSql()}>
+                {loading ? "Rodando…" : "Rodar (Ctrl+Enter)"}
+              </button>
+            )}
+
+            {needsConfirm && (
+              <label class="flex items-center gap-2 text-[11px] text-danger cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={confirmFullTable}
+                  onChange={(e) => setConfirmFullTable(e.currentTarget.checked)}
+                />
+                sem WHERE — confirmo que quero afetar a TABELA INTEIRA
+              </label>
+            )}
+
             <span class="text-[11px] text-muted">
-              somente SELECT / SHOW / DESCRIBE / EXPLAIN · máx. 500 linhas · timeout 8s
+              {isWrite
+                ? "UPDATE/DELETE rodam em background (pode levar minutos) · DROP/TRUNCATE/ALTER bloqueados"
+                : "SELECT / SHOW / DESCRIBE / EXPLAIN · máx. 500 linhas · timeout 8s"}
             </span>
           </div>
+
+          {writeResult && (
+            <div
+              class={
+                "text-xs rounded border px-3 py-2 mb-4 " +
+                (writeResult.status === "error"
+                  ? "border-danger text-danger"
+                  : writeResult.status === "done"
+                    ? "border-accent text-accent"
+                    : "border-border text-muted")
+              }
+            >
+              {writeResult.status === "running" && "Executando… (pode levar minutos em tabela grande)"}
+              {writeResult.status === "done" && `Concluído — ${writeResult.rowcount} linha(s) afetada(s).`}
+              {writeResult.status === "error" && `Erro: ${writeResult.error}`}
+            </div>
+          )}
+
           <ResultTable data={data} />
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import { adminApi } from "../../lib/api.js";
 import { ChipBar } from "../../components/ChipBar.jsx";
+import { LanguageSelect } from "../../components/LanguageSelect.jsx";
 
 const PAGE = 30;
 const inp = "bg-[#081019] border border-border rounded px-2 py-1 text-xs";
@@ -104,7 +105,13 @@ function ChannelRow({ c, open, onToggle, onChange }) {
       setLoading(true);
       adminApi.channelDetail(c.id).then((d) => {
         setDetail(d);
-        setForm({ name: d.name, category: d.category || "", logo_url: d.logo_url || "", is_broadcast_tv: d.is_broadcast_tv });
+        setForm({
+          name: d.name,
+          category: d.category || "",
+          language: d.language || null,
+          logo_url: d.logo_url || "",
+          is_broadcast_tv: d.is_broadcast_tv,
+        });
         setLoading(false);
       });
     }
@@ -146,7 +153,11 @@ function ChannelRow({ c, open, onToggle, onChange }) {
             <div class="grid grid-cols-2 gap-2 py-2">
               <input class={inp} placeholder="Nome" value={form.name} onInput={(e) => setForm({ ...form, name: e.currentTarget.value })} />
               <input class={inp} placeholder="Categoria" value={form.category} onInput={(e) => setForm({ ...form, category: e.currentTarget.value })} />
-              <input class={inp + " col-span-2"} placeholder="Logo URL" value={form.logo_url} onInput={(e) => setForm({ ...form, logo_url: e.currentTarget.value })} />
+              <label class="text-xs text-muted flex items-center gap-2">
+                Idioma
+                <LanguageSelect value={form.language} onChange={(v) => setForm({ ...form, language: v })} />
+              </label>
+              <input class={inp} placeholder="Logo URL" value={form.logo_url} onInput={(e) => setForm({ ...form, logo_url: e.currentTarget.value })} />
               <label class="text-xs text-muted flex items-center gap-2">
                 <input type="checkbox" checked={form.is_broadcast_tv} onChange={(e) => setForm({ ...form, is_broadcast_tv: e.currentTarget.checked })} />
                 TV aberta
@@ -157,6 +168,7 @@ function ChannelRow({ c, open, onToggle, onChange }) {
                   await adminApi.updateChannel(c.id, {
                     name: form.name,
                     category: form.category || null,
+                    language: form.language || null,
                     logo_url: form.logo_url || null,
                     is_broadcast_tv: form.is_broadcast_tv,
                   });

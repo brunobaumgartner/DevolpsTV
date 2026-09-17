@@ -10,6 +10,7 @@ const PAGE = 60;
 export function LiveTV() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState(null);
+  const [lang, setLang] = useState(null);
   const [page, setPage] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -19,19 +20,24 @@ export function LiveTV() {
   // pra paginar — e sem contagem real, a lista de ~1200 categorias virava
   // uma bagunça sem hierarquia nenhuma)
   const categories = useFetch("channel-categories", () => api.channelCategories());
+  // idioma do conteúdo do canal (recuperado dos dados originais de
+  // importação — ver recover_channel_language.py) -- pedido do produto em
+  // 2026-09-13 pra separar canais por idioma em vez de misturar tudo
+  const languages = useFetch("channel-languages", () => api.channelLanguages());
 
   useEffect(() => {
     const id = setTimeout(() => {
       setPage(0);
-      fetchPage(0, q, cat);
+      fetchPage(0, q, cat, lang);
     }, 250);
     return () => clearTimeout(id);
-  }, [q, cat]);
+  }, [q, cat, lang]);
 
-  function fetchPage(p, qq = q, cc = cat) {
+  function fetchPage(p, qq = q, cc = cat, ll = lang) {
     setLoading(true);
     const params = { limit: PAGE, offset: p * PAGE };
     if (cc) params.category = cc;
+    if (ll) params.language = ll;
     if (qq) params.q = qq;
     api
       .channels(params)
@@ -62,6 +68,20 @@ export function LiveTV() {
           placeholder="Buscar canal…"
           class="flex-1 min-w-[160px] bg-[#081019] border border-border rounded px-3 py-1.5 text-sm"
         />
+        {(languages.data?.languages?.length || 0) > 1 && (
+          <select
+            value={lang || ""}
+            onChange={(e) => setLang(e.currentTarget.value || null)}
+            class="bg-[#081019] border border-border rounded px-2 py-1.5 text-sm text-muted"
+          >
+            <option value="">Todos os idiomas</option>
+            {languages.data.languages.map((l) => (
+              <option value={l.language}>
+                {l.label} ({l.count})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <ChipBar

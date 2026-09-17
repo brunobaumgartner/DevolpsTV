@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import { adminApi } from "../../lib/api.js";
 import { ChipBar } from "../../components/ChipBar.jsx";
+import { LanguageSelect } from "../../components/LanguageSelect.jsx";
 
 const PAGE = 30;
 
@@ -118,6 +119,8 @@ export function AdminVodCatalog() {
 function TitleRow({ t, open, onToggle, onChange }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState(t.language || null);
+  const [savedLang, setSavedLang] = useState(false);
 
   useEffect(() => {
     if (open && !detail) {
@@ -159,6 +162,20 @@ function TitleRow({ t, open, onToggle, onChange }) {
 
       {open && (
         <div class="px-3 pb-3 border-t border-border">
+          <label class="flex items-center gap-2 text-xs text-muted py-2">
+            Idioma
+            <LanguageSelect
+              value={language}
+              onChange={async (v) => {
+                setLanguage(v);
+                await adminApi.setTitleLanguage(t.id, v);
+                setSavedLang(true);
+                setTimeout(() => setSavedLang(false), 1500);
+              }}
+            />
+            {savedLang && <span class="text-accent">✓ salvo</span>}
+          </label>
+
           {loading && <div class="text-muted text-xs py-2">Carregando episódios…</div>}
           {detail?.items.map((it) => (
             <ItemRow t={detail} it={it} onChange={() => adminApi.vodAdminDetail(t.id).then(setDetail)} />
