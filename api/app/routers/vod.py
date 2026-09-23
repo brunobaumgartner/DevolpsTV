@@ -39,6 +39,11 @@ ADULT_GENRE = "Adulto"
 def _hide_adult(access: AccessToken) -> bool:
     return not (access and access.sees_adult_content)
 
+# ordem alfabética ignorando símbolos no começo ("¡Viva!", "...E o Vento",
+# "(A) Fronteira", "#Natal"): sem isso o MySQL põe todos os títulos que
+# começam com pontuação antes do "A" (achado real 2026-09-23)
+SORT_TITLE = func.regexp_replace(VodTitle.title, "^[^[:alnum:]]+", "")
+
 # fração do vídeo a partir da qual consideramos "assistido até o fim"
 FINISH_RATIO = 0.92
 
@@ -97,7 +102,7 @@ def list_vod(
     # sem juntar nada) 2) busca o agregado só pra essas ≤200 linhas (join
     # trivial, IN pequeno). Muito mais barato pro caso comum (poucas páginas
     # vistas por vez) mesmo com catálogo de centenas de milhares de títulos.
-    page_titles = base.order_by(VodTitle.title).offset(offset).limit(limit).all()
+    page_titles = base.order_by(SORT_TITLE, VodTitle.id).offset(offset).limit(limit).all()
     page_ids = [t.id for t in page_titles]
 
     counts = {}

@@ -187,7 +187,7 @@ def admin_list_vod(
         base = base.filter(VodTitle.title.ilike(f"%{q.strip()}%"))
 
     total = base.with_entities(func.count(VodTitle.id)).scalar() or 0
-    titles = base.order_by(VodTitle.title).offset(offset).limit(limit).all()
+    titles = base.order_by(func.regexp_replace(VodTitle.title, "^[^[:alnum:]]+", ""), VodTitle.id).offset(offset).limit(limit).all()
     return {
         "count": total,
         "titles": [
