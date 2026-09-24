@@ -46,6 +46,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload
 
 from . import languages
+from .title_clean import split_trailing_year
 from .db import SessionLocal
 from .models import VodItem, VodTitle
 from .vod_mirrors import upsert_mirror
@@ -185,6 +186,13 @@ def _import_rows(rows: list[dict], db, on_progress=None) -> dict:
     viagem extra ao banco, e a única coisa que ele garantia (o ID do pai) o
     relacionamento já resolve de graça."""
     stats = {"titulos_novos": 0, "titulos_atualizados": 0, "itens_novos": 0, "itens_atualizados": 0, "linhas_ignoradas": []}
+
+    for r in rows:
+        name = _clean(r.get("title"))
+        if name:
+            r["title"], y = split_trailing_year(name, _clean_int(r.get("year")))
+            if y and _clean_int(r.get("year")) is None:
+                r["year"] = str(y)
 
     title_cache = _preload_titles(db, rows)
     items_cache = _preload_items(db, title_cache)

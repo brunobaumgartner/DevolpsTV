@@ -13,7 +13,6 @@ Mesmo padrão de job em background + progresso do imdb_classifier.py.
 """
 
 import json
-import re
 import threading
 import time
 import uuid
@@ -27,6 +26,7 @@ from .config import TMDB_API_KEY
 from .db import SessionLocal
 from .job_registry import is_cancelled, register
 from .models import VodTitle
+from .title_clean import split_trailing_year
 
 _TMDB_SEARCH = "https://api.themoviedb.org/3/search/{kind}"
 # w185: o card do catálogo renderiza o pôster a 150-180px (ver Card.jsx/
@@ -109,26 +109,7 @@ def _tmdb_get(kind: str, params: dict):
     return None
 
 
-_Y = r"(19(?:0[1-9]|[1-9]\d)|20\d\d)"  # 1901-2099
-_YEAR_JUNK = re.compile(rf"(?:\s*\(\s*{_Y}\s*\)|\s+[-–—]\s*{_Y})\s*$")
-
-
-def _clean_title(title: str, year):
-    """Tira o ano do FIM do nome, entre parênteses ou depois de hífen
-    ("Slender Man - 2018", "X (2021)", "X (2021) (2021)"), e devolve
-    (título_limpo, ano). O ano da coluna vence; o do nome só entra se a
-    coluna estiver vazia. O TMDB não acha o título com o ano dentro da query
-    (achado real 2026-09-23: ~27 mil sem capa tinham isso). Ano solto sem
-    hífen/parênteses ("Wonder Woman 1984") NÃO é tirado, faz parte do nome."""
-    t = title.strip()
-    found = None
-    while True:
-        m = _YEAR_JUNK.search(t)
-        if not m or not t[: m.start()].strip():
-            break
-        found = found or int(m.group(1) or m.group(2))
-        t = t[: m.start()].strip()
-    return t, (year or found)
+_clean_title = split_trailing_year
 
 
 def _search_tmdb(title: str, year, is_series: bool):
