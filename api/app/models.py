@@ -191,6 +191,8 @@ class AdminSession(Base):
     admin_user_id = Column(Integer, ForeignKey("admin_users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
+    # sessão criada pelo bilhete do play.exposite.com.br (HTTP): sem poder de admin
+    play_only = Column(Boolean, nullable=False, default=False, server_default="0")
 
 
 class WorkerRun(Base):

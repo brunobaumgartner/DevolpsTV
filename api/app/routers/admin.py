@@ -3,6 +3,8 @@ séries) via formulário web, além do importador CSV (api/app/import_vod.py,
 continua existindo pra cargas em lote)."""
 
 import secrets
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -12,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth_admin import (
+    PLAY_SESSION_TTL_HOURS,
     SESSION_COOKIE_NAME,
     create_session,
     hash_password,
@@ -122,6 +125,51 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         samesite="lax",
         max_age=14 * 24 * 3600,
         path="/",
+    )
+    return {"ok": True}
+
+
+# Bilhete de uso único pra ir do site HTTPS pro play.exposite.com.br (HTTP
+# puro, onde link de vídeo http:// toca sem "conteúdo misto"). O cookie de
+# sessão não atravessa de um subdomínio pro outro, então o site HTTPS gera um
+# bilhete (60s, 1 uso) e o play troca por uma sessão "só de reprodução". Em
+# memória: a API roda em 1 processo só (uvicorn sem --workers).
+_PLAY_TICKET_TTL_SECONDS = 60
+_play_tickets: dict[str, tuple[int, float]] = {}
+_play_tickets_lock = threading.Lock()
+
+
+class PlayLoginRequest(BaseModel):
+    ticket: str
+
+
+@router.post("/play-ticket")
+def play_ticket(user: AdminUser = Depends(require_login)):
+    now = time.time()
+    ticket = secrets.token_urlsafe(24)
+    with _play_tickets_lock:
+        for k in [k for k, (_, exp) in _play_tickets.items() if exp < now]:
+            del _play_tickets[k]
+        _play_tickets[ticket] = (user.id, now + _PLAY_TICKET_TTL_SECONDS)
+    return {"ticket": ticket}
+
+
+@router.post("/play-login")
+def play_login(payload: PlayLoginRequest, response: Response, db: Session = Depends(get_db)):
+    with _play_tickets_lock:
+        entry = _play_tickets.pop(payload.ticket, None)
+    if entry is None or entry[1] < time.time():
+        raise HTTPException(status_code=401, detail="Bilhete inválido ou expirado")
+
+    token = create_session(db, entry[0], play_only=True)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=PLAY_SESSION_TTL_HOURS * 3600,
+        path="/",
+        secure=False,
     )
     return {"ok": True}
 

@@ -37,10 +37,18 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(derived, expected)
 
 
-def create_session(db: Session, admin_user_id: int) -> str:
+PLAY_SESSION_TTL_HOURS = 12
+
+
+def create_session(db: Session, admin_user_id: int, play_only: bool = False) -> str:
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
-    db.add(AdminSession(session_token=token, admin_user_id=admin_user_id, expires_at=expires_at))
+    ttl = timedelta(hours=PLAY_SESSION_TTL_HOURS) if play_only else timedelta(days=SESSION_TTL_DAYS)
+    expires_at = datetime.now(timezone.utc) + ttl
+    db.add(
+        AdminSession(
+            session_token=token, admin_user_id=admin_user_id, expires_at=expires_at, play_only=play_only
+        )
+    )
     db.commit()
     return token
 
@@ -66,12 +74,13 @@ def require_login(
     user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    user._session_play_only = bool(session.play_only)
     return user
 
 
 def require_admin(user: AdminUser = Depends(require_login)) -> AdminUser:
     """Igual a require_login, mas só deixa passar role "admin" — usado em
     todo endpoint de escrita/gestão do painel."""
-    if user.role != "admin":
+    if user.role != "admin" or getattr(user, "_session_play_only", False):
         raise HTTPException(status_code=403, detail="Sem permissão de administrador")
     return user

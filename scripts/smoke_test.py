@@ -208,6 +208,24 @@ def main():
         finally:
             requests.delete(f"{BASE}/p/{ctx['token']}/progress/{title_id}", timeout=10)
 
+    # ---------- play.exposite.com.br: bilhete de uso único ----------
+    @check("bilhete do play: 1 uso, vira sessão SEM poder de admin")
+    def _():
+        t = admin.post(f"{BASE}/admin/play-ticket", timeout=10)
+        assert t.status_code == 200, f"HTTP {t.status_code} ao gerar bilhete"
+        ticket = t.json()["ticket"]
+
+        p = requests.Session()
+        r = p.post(f"{BASE}/admin/play-login", json={"ticket": ticket}, timeout=10)
+        assert r.status_code == 200, f"HTTP {r.status_code} ao trocar o bilhete"
+        me = p.get(f"{BASE}/admin/me", timeout=10)
+        assert me.status_code == 200 and me.json().get("token"), "sessão do play não resolveu o token"
+        assert p.get(f"{BASE}/admin/dashboard", timeout=10).status_code == 403, "sessão do play acessou endpoint de admin!"
+
+        again = requests.post(f"{BASE}/admin/play-login", json={"ticket": ticket}, timeout=10)
+        assert again.status_code == 401, "bilhete funcionou 2 vezes"
+        assert requests.post(f"{BASE}/admin/play-ticket", timeout=10).status_code == 401, "gerou bilhete sem login"
+
     # ---------- logout ----------
     @check("logout invalida a sessão")
     def _():

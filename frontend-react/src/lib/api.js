@@ -93,6 +93,8 @@ const jdel = (path) => req(path, { method: "DELETE" });
 export const adminApi = {
   me: () => req("admin/me"),
   tokens: () => req("admin/tokens"),
+  playTicket: () => jpost("admin/play-ticket"),
+  playLogin: (ticket) => jpost("admin/play-login", { ticket }),
   login: (username, password) => jpost("admin/login", { username, password }),
   logout: () => fetch(BASE + "admin/logout", { method: "POST", credentials: "include" }).catch(() => {}),
 

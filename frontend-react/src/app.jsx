@@ -8,6 +8,7 @@ import { Watch } from "./pages/Watch.jsx";
 import { VodList } from "./pages/VodList.jsx";
 import { LiveTV } from "./pages/LiveTV.jsx";
 import { Stub } from "./pages/Stub.jsx";
+import { onPlayHost, secureUrl } from "./lib/playHost.js";
 
 const AdminApp = lazy(() => import("./pages/admin/AdminApp.jsx"), "AdminApp");
 
@@ -25,6 +26,14 @@ export function App() {
     <>
       <Sidebar isAdmin={session.isAdmin} onLogout={session.refresh} />
       <main class="md:pl-[210px] min-h-screen">
+        {onPlayHost() && (
+          <div class="px-4 md:px-8 py-2 text-[12px] text-muted bg-card border-b border-border">
+            Modo de reprodução (sem HTTPS).{" "}
+            <a href={secureUrl()} class="text-accent underline">
+              Voltar ao site seguro
+            </a>
+          </div>
+        )}
         <Switch fallback={<Stub />}>
           <Route path="/" component={Home} />
           <Route path="/assistir/:tipo/:id" component={Watch} />

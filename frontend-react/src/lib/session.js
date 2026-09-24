@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
 import { adminApi, setToken } from "./api.js";
+import { consumeTicketFromUrl } from "./playHost.js";
 
 // login é obrigatório pra tudo agora (não só pro painel admin). /admin/me
 // devolve {username, role, token} quando a sessão (cookie) é válida — o
@@ -8,6 +9,7 @@ export function useSession() {
   const [s, setS] = useState({ ready: false, authed: false, role: null, token: null, username: null });
 
   const refresh = useCallback(async () => {
+    await consumeTicketFromUrl();
     try {
       const me = await adminApi.me();
       if (me.token) setToken(me.token);

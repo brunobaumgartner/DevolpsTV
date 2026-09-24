@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { useFetch } from "../lib/useFetch.js";
 import { api } from "../lib/api.js";
 import { navigate } from "../lib/router.jsx";
+import { needsPlayHost, goPlayHost } from "../lib/playHost.js";
 import { VideoBox } from "../components/VideoBox.jsx";
 import { Row } from "../components/Row.jsx";
 import { Card } from "../components/Card.jsx";
@@ -225,6 +226,16 @@ function WatchVod({ id }) {
         .vodResolve(current.itemId)
         .then((r) => {
           if (!alive) return;
+          if (needsPlayHost(r.url)) {
+            setVodStatus("Abrindo o player…");
+            goPlayHost().catch(() => {
+              if (!alive) return;
+              playUrlRef.current = r.url;
+              setPlayUrl(r.url);
+              setVodStatus("");
+            });
+            return;
+          }
           playUrlRef.current = r.url;
           setPlayUrl(r.url);
           setVodStatus("");
